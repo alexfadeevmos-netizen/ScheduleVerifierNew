@@ -1,13 +1,19 @@
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -24,9 +30,9 @@ import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 
+// Модель элемента расхождения
 data class DiffItem(
     val trainNum: String,
     val station: String,
@@ -41,6 +47,21 @@ enum class StatusType {
     NORMAL, MODIFIED, CANCELLED
 }
 
+// Корпоративная палитра железнодорожного ревизора
+object ThemeColors {
+    val BgCanvas = Color(0xFFF8FAFC)       // Мягкий фон Slate-50
+    val CardBg = Color(0xFFFFFFFF)         // Чистый белый
+    val HeaderSlate = Color(0xFF0F172A)    // Глубокий темно-синий
+    val BorderSubtle = Color(0xFFE2E8F0)   // Границы Slate-200
+    val TextMain = Color(0xFF1E293B)       // Основной текст
+    val TextMuted = Color(0xFF64748B)      // Второстепенный текст
+
+    val PrimaryNavy = Color(0xFF1E3A8A)    // Синий индиго
+    val EmeraldGreen = Color(0xFF059669)   // Зеленый подтверждения
+    val DangerRed = Color(0xFFDC2626)      // Красный отмены
+    val AmberWarning = Color(0xFFD97706)   // Янтарный изменения
+}
+
 @Composable
 fun App() {
     var afishaFile by remember { mutableStateOf<File?>(null) }
@@ -49,7 +70,7 @@ fun App() {
     var diffList by remember { mutableStateOf<List<DiffItem>>(emptyList()) }
     var selectedStation by remember { mutableStateOf("Зеленоград-Крюково") }
     var isProcessing by remember { mutableStateOf(false) }
-    var statusLog by remember { mutableStateOf("Загрузите Афишу, Телеграмму и Выгрузки для синхронизации") }
+    var statusLog by remember { mutableStateOf("Готов к работе. Загрузите файлы афиши, телеграммы и выгрузок.") }
 
     val coroutineScope = rememberCoroutineScope()
     val stationsList = listOf("Зеленоград-Крюково", "Химки", "Сходня", "Тверь", "Клин", "Подсолнечная", "Москва Пассажирская")
@@ -64,169 +85,343 @@ fun App() {
         return res
     }
 
+    val cancelledCount = diffList.count { it.statusType == StatusType.CANCELLED }
+    val modifiedCount = diffList.count { it.statusType == StatusType.MODIFIED }
+
     MaterialTheme {
-        Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF1F5F9)) {
-            Column(modifier = Modifier.fillMaxSize().padding(14.dp)) {
-                // Карточка заголовка
+        Surface(modifier = Modifier.fillMaxSize(), color = ThemeColors.BgCanvas) {
+            Column(modifier = Modifier.fillMaxSize().padding(18.dp)) {
+
+                // 1. ВЕРХНИЙ ХЕДЕР: Название и статус-панель
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(2.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = ThemeColors.CardBg),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text("Синхронизатор расписаний и генератор отчетов отмен", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(statusLog, fontSize = 13.sp, color = Color(0xFF475569))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = ThemeColors.PrimaryNavy,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "SCHEDULE VERIFIER PRO",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = ThemeColors.HeaderSlate,
+                                    letterSpacing = 1.sp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFFEEF2F6)
+                                ) {
+                                    Text(
+                                        text = "РЕВИЗОР РАСПИСАНИЙ",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = ThemeColors.TextMuted,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = statusLog,
+                                fontSize = 13.sp,
+                                color = if (isProcessing) ThemeColors.PrimaryNavy else ThemeColors.TextMuted
+                            )
+                        }
+
+                        // Мини-виджеты статистики
+                        if (diffList.isNotEmpty()) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                StatBadge("ОТМЕНЫ", cancelledCount.toString(), ThemeColors.DangerRed, Color(0xFFFEE2E2))
+                                StatBadge("СДВИГИ", modifiedCount.toString(), ThemeColors.AmberWarning, Color(0xFFFEF3C7))
+                            }
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Кнопки выбора файлов
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
+                // 2. БЛОК ЗАГРУЗКИ ДОКУМЕНТОВ
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ActionUploadCard(
+                        title = "АФИША РАСПИСАНИЯ",
+                        subtitle = if (afishaFile != null) afishaFile!!.name else "Файл Excel (.xlsx)",
+                        icon = Icons.Default.DateRange,
+                        isLoaded = afishaFile != null,
+                        color = ThemeColors.EmeraldGreen,
+                        modifier = Modifier.weight(1f),
                         onClick = {
-                            val f = pickFile("Выберите Афишу (.xlsx)")
+                            val f = pickFile("Выберите Афишу расписания (.xlsx)")
                             if (f.isNotEmpty()) {
                                 afishaFile = f.first()
-                                statusLog = "Афиша: ${afishaFile?.name}"
+                                statusLog = "Афиша загружена: ${afishaFile?.name}"
                             }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0D9488)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(if (afishaFile == null) "1. Афиша (.xlsx)" else "✓ ${afishaFile?.name?.take(18)}...")
-                    }
+                        }
+                    )
 
-                    Button(
+                    ActionUploadCard(
+                        title = "ОФИЦИАЛЬНАЯ ТЕЛЕГРАММА",
+                        subtitle = if (telegramFile != null) telegramFile!!.name else "Word (.docx) или PDF",
+                        icon = Icons.Default.Info,
+                        isLoaded = telegramFile != null,
+                        color = ThemeColors.PrimaryNavy,
+                        modifier = Modifier.weight(1f),
                         onClick = {
                             val f = pickFile("Выберите Телеграмму (Word/PDF)")
                             if (f.isNotEmpty()) {
                                 telegramFile = f.first()
-                                statusLog = "Телеграмма: ${telegramFile?.name}"
+                                statusLog = "Телеграмма загружена: ${telegramFile?.name}"
                             }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(if (telegramFile == null) "2. Телеграмма (.docx/.pdf)" else "✓ ${telegramFile?.name?.take(18)}...")
-                    }
+                        }
+                    )
 
-                    Button(
+                    ActionUploadCard(
+                        title = "ВЫГРУЗКИ ПО СТАНЦИЯМ",
+                        subtitle = if (vygruzkiFiles.isNotEmpty()) "Выбрано файлов: ${vygruzkiFiles.size}" else "Текстовые файлы (.txt)",
+                        icon = Icons.Default.List,
+                        isLoaded = vygruzkiFiles.isNotEmpty(),
+                        color = Color(0xFF4F46E5),
+                        modifier = Modifier.weight(1f),
                         onClick = {
-                            val f = pickFile("Выберите Выгрузки (.txt)", multiple = true)
+                            val f = pickFile("Выберите текстовые выгрузки (.txt)", multiple = true)
                             if (f.isNotEmpty()) {
                                 vygruzkiFiles = f
-                                statusLog = "Выгрузок выбрано: ${f.size}"
+                                statusLog = "Загружено оперативных выгрузок: ${f.size}"
                             }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(if (vygruzkiFiles.isEmpty()) "3. Выгрузки (.txt)" else "✓ Выгрузок: ${vygruzkiFiles.size}")
-                    }
+                        }
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Фильтр по станции и действия
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Контрольная станция:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    stationsList.forEach { st ->
-                        FilterChip(
-                            selected = (selectedStation == st),
-                            onClick = { selectedStation = st },
-                            label = { Text(st.replace("Зеленоград-", ""), fontSize = 12.sp) }
+                // 3. ПАНЕЛЬ ФИЛЬТРА СТАНЦИЙ И КНОПКИ ДЕЙСТВИЯ
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(containerColor = ThemeColors.CardBg),
+                    elevation = CardDefaults.cardElevation(1.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Станция сверки:",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = ThemeColors.HeaderSlate
                         )
-                    }
+                        Spacer(modifier = Modifier.width(10.dp))
 
-                    Spacer(modifier = Modifier.weight(1f))
-
-                    Button(
-                        onClick = {
-                            if (afishaFile == null) return@Button
-                            coroutineScope.launch {
-                                isProcessing = true
-                                statusLog = "Выполняется синхронизация данных..."
-                                diffList = withContext(Dispatchers.IO) {
-                                    compareAllSources(afishaFile!!, telegramFile, vygruzkiFiles, selectedStation)
-                                }
-                                isProcessing = false
-                                statusLog = "Сверка завершена. Изменений обнаружено: ${diffList.size}"
+                        // Чипы станций
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            stationsList.forEach { st ->
+                                val isSelected = (selectedStation == st)
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = { selectedStation = st },
+                                    label = {
+                                        Text(
+                                            text = st.replace("Зеленоград-", ""),
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = ThemeColors.HeaderSlate,
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
                             }
-                        },
-                        enabled = !isProcessing && afishaFile != null,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A))
-                    ) {
-                        Text(if (isProcessing) "Сверка..." else "Сверить")
-                    }
+                        }
 
-                    Button(
-                        onClick = {
-                            if (diffList.isEmpty()) return@Button
-                            exportCancellationReport(diffList, selectedStation)
-                            statusLog = "Отчет 'ОТМЕНА_$selectedStation.txt' успешно создан на Рабочем столе!"
-                        },
-                        enabled = diffList.isNotEmpty(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
-                    ) {
-                        Text("Создать файл ОТМЕНА")
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        // Кнопка СВЕРИТЬ
+                        Button(
+                            onClick = {
+                                if (afishaFile == null) return@Button
+                                coroutineScope.launch {
+                                    isProcessing = true
+                                    statusLog = "Синхронизация Афиши, Телеграммы и Выгрузок..."
+                                    diffList = withContext(Dispatchers.IO) {
+                                        compareAllSources(afishaFile!!, telegramFile, vygruzkiFiles, selectedStation)
+                                    }
+                                    isProcessing = false
+                                    statusLog = "Сверка завершена. Найдено расхождений по ст. $selectedStation: ${diffList.size}"
+                                }
+                            },
+                            enabled = !isProcessing && afishaFile != null,
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = ThemeColors.PrimaryNavy),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (isProcessing) "Сверка..." else "Сверить данные", fontWeight = FontWeight.SemiBold)
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        // Кнопка ЭКСПОРТ В ФАЙЛ
+                        Button(
+                            onClick = {
+                                if (diffList.isEmpty()) return@Button
+                                exportCancellationReport(diffList, selectedStation)
+                                statusLog = "Отчет 'ОТМЕНА_$selectedStation.txt' успешно сохранен на Рабочий стол!"
+                            },
+                            enabled = diffList.isNotEmpty(),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = ThemeColors.DangerRed),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Создать файл ОТМЕНА", fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Таблица отчета
+                // 4. ТАБЛИЦА РЕЗУЛЬТАТОВ РЕВИЗИИ
                 Card(
                     modifier = Modifier.fillMaxSize(),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = ThemeColors.CardBg),
                     elevation = CardDefaults.cardElevation(2.dp)
                 ) {
-                    Column(modifier = Modifier.fillMaxSize().padding(10.dp)) {
+                    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+                        // Заголовок колонок
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color(0xFFE2E8F0), RoundedCornerShape(4.dp))
-                                .padding(8.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFFF1F5F9))
+                                .padding(vertical = 10.dp, horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Поезд", fontWeight = FontWeight.Bold, modifier = Modifier.width(90.dp))
-                            Text("Станция", fontWeight = FontWeight.Bold, modifier = Modifier.width(140.dp))
-                            Text("По афише", fontWeight = FontWeight.Bold, modifier = Modifier.width(90.dp))
-                            Text("Факт/Телегр.", fontWeight = FontWeight.Bold, modifier = Modifier.width(100.dp))
-                            Text("Статус", fontWeight = FontWeight.Bold, modifier = Modifier.width(120.dp))
-                            Text("Детали расхождения", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text("ПОЕЗД", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = ThemeColors.HeaderSlate, modifier = Modifier.width(90.dp))
+                            Text("СТАНЦИЯ", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = ThemeColors.HeaderSlate, modifier = Modifier.width(140.dp))
+                            Text("ПО АФИШЕ", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = ThemeColors.HeaderSlate, modifier = Modifier.width(90.dp))
+                            Text("ФАКТ / ТЕЛ.", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = ThemeColors.HeaderSlate, modifier = Modifier.width(100.dp))
+                            Text("СТАТУС", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = ThemeColors.HeaderSlate, modifier = Modifier.width(130.dp))
+                            Text("ДЕТАЛИ И ПРИМЕЧАНИЯ", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = ThemeColors.HeaderSlate, modifier = Modifier.weight(1f))
                         }
 
-                        Divider(modifier = Modifier.padding(vertical = 4.dp), color = Color(0xFFCBD5E1))
+                        Divider(color = ThemeColors.BorderSubtle, modifier = Modifier.padding(vertical = 4.dp))
 
                         if (diffList.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Нажмите «Сверить» для построения отчета расхождений.", color = Color.Gray)
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = null,
+                                        tint = Color(0xFFCBD5E1),
+                                        modifier = Modifier.size(48.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "Нет данных для отображения. Загрузите файлы и нажмите «Сверить данные».",
+                                        color = ThemeColors.TextMuted,
+                                        fontSize = 14.sp
+                                    )
+                                }
                             }
                         } else {
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
                                 items(diffList) { item ->
-                                    val (bg, txt) = when (item.statusType) {
-                                        StatusType.CANCELLED -> Color(0xFFFFE4E6) to Color(0xFF9F1239)
-                                        StatusType.MODIFIED -> Color(0xFFFEF3C7) to Color(0xFF92400E)
-                                        StatusType.NORMAL -> Color.Transparent to Color(0xFF1E293B)
+                                    val (badgeBg, badgeText, statusBorder) = when (item.statusType) {
+                                        StatusType.CANCELLED -> Triple(Color(0xFFFEE2E2), Color(0xFF991B1B), Color(0xFFFCA5A5))
+                                        StatusType.MODIFIED -> Triple(Color(0xFFFEF3C7), Color(0xFF92400E), Color(0xFFFCD34D))
+                                        StatusType.NORMAL -> Triple(Color(0xFFECFDF5), Color(0xFF065F46), Color(0xFFA7F3D0))
                                     }
 
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .background(bg, RoundedCornerShape(4.dp))
-                                            .padding(vertical = 6.dp, horizontal = 8.dp),
+                                            .padding(vertical = 4.dp, horizontal = 4.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(if (item.statusType == StatusType.CANCELLED) Color(0xFFFFF5F5) else Color.White)
+                                            .border(1.dp, if (item.statusType == StatusType.CANCELLED) Color(0xFFFEE2E2) else Color(0xFFF1F5F9), RoundedCornerShape(6.dp))
+                                            .padding(vertical = 8.dp, horizontal = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(item.trainNum, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(90.dp))
-                                        Text(item.station, modifier = Modifier.width(140.dp))
-                                        Text(item.afishaTime, modifier = Modifier.width(90.dp))
-                                        Text(item.actualTime, fontWeight = FontWeight.Medium, modifier = Modifier.width(100.dp))
-                                        Text(item.status, color = txt, fontWeight = FontWeight.Bold, modifier = Modifier.width(120.dp))
-                                        Text(item.details, color = txt, modifier = Modifier.weight(1f))
+                                        // Номер поезда в строгом моноширинном стиле
+                                        Text(
+                                            text = item.trainNum,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 13.sp,
+                                            color = ThemeColors.HeaderSlate,
+                                            modifier = Modifier.width(90.dp)
+                                        )
+
+                                        Text(
+                                            text = item.station,
+                                            fontSize = 13.sp,
+                                            color = ThemeColors.TextMain,
+                                            modifier = Modifier.width(140.dp)
+                                        )
+
+                                        Text(
+                                            text = item.afishaTime,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 13.sp,
+                                            color = ThemeColors.TextMuted,
+                                            modifier = Modifier.width(90.dp)
+                                        )
+
+                                        Text(
+                                            text = item.actualTime,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 13.sp,
+                                            color = if (item.actualTime == "--:--") ThemeColors.DangerRed else ThemeColors.HeaderSlate,
+                                            modifier = Modifier.width(100.dp)
+                                        )
+
+                                        // Бейдж статуса
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = badgeBg,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, statusBorder),
+                                            modifier = Modifier.width(120.dp)
+                                        ) {
+                                            Text(
+                                                text = item.status,
+                                                color = badgeText,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(10.dp))
+
+                                        Text(
+                                            text = item.details,
+                                            fontSize = 12.sp,
+                                            color = ThemeColors.TextMain,
+                                            modifier = Modifier.weight(1f)
+                                        )
                                     }
-                                    Divider(color = Color(0xFFF1F5F9))
                                 }
                             }
                         }
@@ -237,7 +432,84 @@ fun App() {
     }
 }
 
-// Полноценный анализ Афиши (по горизонтали), Телеграммы и Текстовых выгрузок
+// Компонент карточки загрузки файлов
+@Composable
+fun ActionUploadCard(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    isLoaded: Boolean,
+    color: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = ThemeColors.CardBg),
+        elevation = CardDefaults.cardElevation(1.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isLoaded) color.copy(alpha = 0.12f) else Color(0xFFF1F5F9),
+                modifier = Modifier.size(40.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = if (isLoaded) Icons.Default.Check else icon,
+                        contentDescription = null,
+                        tint = if (isLoaded) color else ThemeColors.TextMuted,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ThemeColors.TextMuted)
+                Text(
+                    text = subtitle,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ThemeColors.HeaderSlate,
+                    maxLines = 1
+                )
+            }
+
+            TextButton(
+                onClick = onClick,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(if (isLoaded) "Заменить" else "Выбрать", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = color)
+            }
+        }
+    }
+}
+
+// Компонент индикатора статистики в шапке
+@Composable
+fun StatBadge(label: String, count: String, color: Color, bg: Color) {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = bg,
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.3f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = "$label: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = color)
+            Text(text = count, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = color)
+        }
+    }
+}
+
+// Алгоритм синхронизации всех источников
 fun compareAllSources(
     afisha: File,
     telegram: File?,
@@ -265,14 +537,14 @@ fun compareAllSources(
         }
     }
 
-    // 2. Читаем выгрузки TXT
+    // 2. Читаем текст выгрузок
     val vygruzkiText = buildString {
         vygruzki.forEach { f ->
             try { append(f.readText()).append("\n") } catch (_: Exception) {}
         }
     }
 
-    // 3. Читаем Афишу Excel по горизонтали со всех вкладок
+    // 3. Читаем Афишу Excel по горизонтали со всех листов
     try {
         FileInputStream(afisha).use { fis ->
             val wb = WorkbookFactory.create(fis)
@@ -281,11 +553,10 @@ fun compareAllSources(
             for (sheetIndex in 0 until wb.numberOfSheets) {
                 val sheet = wb.getSheetAt(sheetIndex)
 
-                // Ищем строку с номерами поездов (обычно строка 3 или 4)
                 var trainRowIndex = -1
                 for (r in 0..6) {
                     val row = sheet.getRow(r) ?: continue
-                    for (c in 1..20) {
+                    for (c in 1..25) {
                         val v = row.getCell(c)?.toString()?.trim() ?: ""
                         if (v.matches(Regex("\\d{4}(/\\d{4})?"))) {
                             trainRowIndex = r
@@ -296,7 +567,6 @@ fun compareAllSources(
                 }
                 if (trainRowIndex == -1) continue
 
-                // Ищем строку целевой станции
                 var stationRowIndex = -1
                 for (r in trainRowIndex + 1..sheet.lastRowNum) {
                     val row = sheet.getRow(r) ?: continue
@@ -328,17 +598,16 @@ fun compareAllSources(
                     }
                     if (afishaTime.isEmpty() || afishaTime == "-") continue
 
-                    // Сверяем с Телеграммой и Выгрузкой
                     val numOnly = trainNum.split("/").first()
                     var status = "По графику"
                     var actualTime = afishaTime
                     var details = "Совпадает с афишей"
                     var type = StatusType.NORMAL
 
-                    // Проверка полной отмены поезда в телеграмме
-                    val cancelPattern = Regex("(?i)(отменить|п\\.\\s*нр\\s*$numOnly.*отмен|отменяется.*$numOnly)")
-                    if (cancelPattern.containsMatchIn(telText) || telText.contains("П. НР $numOnly")) {
-                        val otmSnippet = telText.substring((telText.indexOf(numOnly) - 30).coerceAtLeast(0), (telText.indexOf(numOnly) + 50).coerceAtMost(telText.length))
+                    // Проверка отмены в телеграмме
+                    if (telText.contains("П. НР $numOnly") || telText.contains("№ $numOnly") || telText.contains("№$numOnly")) {
+                        val matchIdx = telText.indexOf(numOnly)
+                        val otmSnippet = telText.substring((matchIdx - 30).coerceAtLeast(0), (matchIdx + 60).coerceAtMost(telText.length))
                         if (otmSnippet.contains("отмен", true) || otmSnippet.contains("ОТМЕН", true)) {
                             status = "ОТМЕНЕН"
                             actualTime = "--:--"
@@ -360,14 +629,13 @@ fun compareAllSources(
                         } else if (changeDesc.contains("отправится в", true)) {
                             val newTimeMatch = Regex("отправится в (\\d{2}:\\d{2})").find(changeDesc)
                             val newTime = newTimeMatch?.groupValues?.get(1) ?: ""
-                            status = "ИЗМЕНЕНО ВРЕМЯ"
+                            status = "СДВИГ ГРАФИКА"
                             actualTime = newTime
                             details = changeDesc
                             type = StatusType.MODIFIED
                         }
                     }
 
-                    // Добавляем только те поезда, где есть изменения или отмены
                     if (type != StatusType.NORMAL) {
                         results.add(DiffItem(trainNum, targetStation, afishaTime, actualTime, status, details, type))
                     }
@@ -379,7 +647,7 @@ fun compareAllSources(
     return results
 }
 
-// Экспорт готового текстового файла по шаблону файла "Крюково на Москву"
+// Выгрузка файла отчета "ОТМЕНА" на Рабочий стол
 fun exportCancellationReport(items: List<DiffItem>, station: String) {
     val desktopDir = File(System.getProperty("user.home"), "Desktop")
     val outFile = File(desktopDir, "ОТМЕНА_${station.replace(" ", "_")}.txt")
@@ -400,7 +668,7 @@ fun exportCancellationReport(items: List<DiffItem>, station: String) {
 fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
-        title = "ScheduleVerifier — Ревизор расписаний с приоритетом телеграмм"
+        title = "ScheduleVerifier PRO — Ревизор расписаний с приоритетом телеграмм"
     ) {
         App()
     }
