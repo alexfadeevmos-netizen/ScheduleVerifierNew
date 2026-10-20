@@ -129,6 +129,7 @@ fun cleanTime(raw: String): String {
     return clean
 }
 
+// Преобразование дат в читаемый заголовок
 fun humanizeDateString(raw: String, defaultHeader: String): String {
     val clean = raw.replace("(", "").replace(")", "").trim()
     val monthsMap = mapOf(
@@ -170,6 +171,12 @@ fun humanizeDateString(raw: String, defaultHeader: String): String {
     }
 
     return if (clean.isNotEmpty()) clean else defaultHeader
+}
+
+// Извлечение первого числа даты для хронологической сортировки
+fun extractFirstDateNumber(dateHeader: String): Int {
+    val m = Regex("\\d+").find(dateHeader)
+    return m?.value?.toIntOrNull() ?: 999
 }
 
 data class ParsedTrainBlock(
@@ -300,7 +307,7 @@ fun extractDefaultTelegramPeriod(telText: String): String {
     return "с 3 по 8 октября"
 }
 
-// Строгое и точное определение направления листов
+// Полный анализ расписания со строгим разделением листов и хронологической сортировкой
 fun analyzeScheduleWithSmartDates(
     afisha: File,
     telegrams: List<File>,
@@ -340,7 +347,7 @@ fun analyzeScheduleWithSmartDates(
                 val sheet = wb.getSheetAt(sheetIndex)
                 val sheetName = sheet.sheetName.lowercase().trim()
 
-                // Строгое распознавание направления (исключает ложное совпадение)
+                // Строгое определение направления
                 val isFromMoscow = sheetName.startsWith("москва")
                 val isToMoscow = !isFromMoscow && (sheetName.endsWith("москва") || sheetName.contains("на москву") || sheetName.contains("москва"))
 
@@ -468,9 +475,17 @@ fun analyzeScheduleWithSmartDates(
         }
     } catch (_: Exception) {}
 
-    return Pair(toMsk, fromMsk)
+    // Устранение дубликатов и сортировка: по дням месяца, затем по времени отправления
+    val sortedToMsk = toMsk.distinctBy { "${it.dateGroup}_${it.trainNum}_${it.afishaTime}" }
+        .sortedWith(compareBy({ extractFirstDateNumber(it.dateGroup) }, { it.afishaTime }))
+
+    val sortedFromMsk = fromMsk.distinctBy { "${it.dateGroup}_${it.trainNum}_${it.afishaTime}" }
+        .sortedWith(compareBy({ extractFirstDateNumber(it.dateGroup) }, { it.afishaTime }))
+
+    return Pair(sortedToMsk, sortedFromMsk)
 }
 
+// Экспорт двух файлов строго в хронологическом порядке
 fun exportDatedReports(station: String, toMoscow: List<DatedTrainRecord>, fromMoscow: List<DatedTrainRecord>) {
     val desktop = File(System.getProperty("user.home"), "Desktop")
 
@@ -480,9 +495,11 @@ fun exportDatedReports(station: String, toMoscow: List<DatedTrainRecord>, fromMo
         out.println("на Москву")
 
         val grouped = toMoscow.groupBy { it.dateGroup }
-        grouped.forEach { (dateGroup, list) ->
+        val sortedKeys = grouped.keys.sortedBy { extractFirstDateNumber(it) }
+
+        sortedKeys.forEach { dateGroup ->
             out.println(dateGroup)
-            list.forEach { r ->
+            grouped[dateGroup]?.forEach { r ->
                 out.println("        №${r.trainNum} ${r.destination} отправлением в ${r.afishaTime} - ${r.changeText}")
             }
         }
@@ -494,9 +511,11 @@ fun exportDatedReports(station: String, toMoscow: List<DatedTrainRecord>, fromMo
         out.println("от Ленинградского вокзала, Ипподрома")
 
         val grouped = fromMoscow.groupBy { it.dateGroup }
-        grouped.forEach { (dateGroup, list) ->
+        val sortedKeys = grouped.keys.sortedBy { extractFirstDateNumber(it) }
+
+        sortedKeys.forEach { dateGroup ->
             out.println(dateGroup)
-            list.forEach { r ->
+            grouped[dateGroup]?.forEach { r ->
                 out.println("        №${r.trainNum} отправлением в ${r.afishaTime} - ${r.changeText}")
             }
         }
@@ -510,8 +529,8 @@ fun App() {
     var telegramFiles by remember { mutableStateOf<List<File>>(emptyList()) }
     var vygruzkiFiles by remember { mutableStateOf<List<File>>(emptyList()) }
 
-    var selectedStations by remember { mutableStateOf(setOf("Подрезково", "Сходня", "Химки")) }
-    var currentStationView by remember { mutableStateOf("Подрезково") }
+    var selectedStations by remember { mutableStateOf(setOf("Сходня", "Подрезково", "Химки")) }
+    var currentStationView by remember { mutableStateOf("Сходня") }
     var searchQuery by remember { mutableStateOf("") }
 
     var toMoscowList by remember { mutableStateOf<List<DatedTrainRecord>>(emptyList()) }
@@ -521,7 +540,7 @@ fun App() {
     var isProcessing by remember { mutableStateOf(false) }
     var statusMessage by remember {
         mutableStateOf(
-            if (afishaFile != null) "Базовая афиша активна. Нажмите «Сверить», чтобы увидеть отмены и сдвиги графика в обоих направлениях."
+            if (afishaFile != null) "Базовая афиша активна. Нажмите «Сверить», чтобы увидеть отмены и сдвиги графика строго по хронологии дат."
             else "Загрузите файл базовой афиши расписания (.xlsx)."
         )
     }
@@ -558,7 +577,7 @@ fun App() {
                             Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AppTheme.CorporateBlue, modifier = Modifier.size(28.dp))
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
-                                Text("SCHEDULE VERIFIER PRO — РЕВИЗОР РАСПИСАНИЙ С УЧЕТОМ ДАТ", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = AppTheme.HeaderNavy)
+                                Text("SCHEDULE VERIFIER PRO — ХРОНОЛОГИЧЕСКИЙ РЕВИЗОР РАСПИСАНИЙ", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = AppTheme.HeaderNavy)
                                 Text(statusMessage, fontSize = 12.sp, color = AppTheme.TextMuted)
                             }
                         }
@@ -636,7 +655,7 @@ fun App() {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // ВЫБОР СТАНЦИЙ И ПАКЕТНЫЙ ЭКСПОРТ
+                // ВЫБОР СТАНЦИЙ
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
@@ -648,10 +667,10 @@ fun App() {
                             Text("Станции полигона:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = AppTheme.HeaderNavy)
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            // Крупная кнопка "ВЫБРАТЬ ВСЕ СТАНЦИИ" / "СНЯТЬ ВСЕ"
+                            // Кнопка ВЫБРАТЬ ВСЕ / СНЯТЬ ВСЕ
                             FilledTonalButton(
                                 onClick = {
-                                    selectedStations = if (selectedStations.size == ALL_STATIONS.size) setOf("Подрезково") else ALL_STATIONS.toSet()
+                                    selectedStations = if (selectedStations.size == ALL_STATIONS.size) setOf("Сходня") else ALL_STATIONS.toSet()
                                 },
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 shape = RoundedCornerShape(6.dp)
@@ -743,7 +762,7 @@ fun App() {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // ТАБЫ И ПОЛЕ ПОИСКА (ИСПРАВЛЕНО ОБРЕЗАНИЕ ТЕКСТА)
+                // ТАБЫ И ПОЛЕ ПОИСКА (БЕЗ ОБРЕЗАНИЯ ШРИФТА)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     TabRow(
                         selectedTabIndex = activeTab,
@@ -763,7 +782,6 @@ fun App() {
                         )
                     }
 
-                    // Полноразмерное поле поиска без обрезания букв
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
@@ -778,7 +796,6 @@ fun App() {
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // ТАБЛИЦА РЕЗУЛЬТАТОВ
                 val currentList = (if (activeTab == 0) toMoscowList else fromMoscowList)
                     .filter { it.trainNum.contains(searchQuery.trim(), ignoreCase = true) }
 
@@ -793,7 +810,7 @@ fun App() {
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFFF1F5F9)).padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("ПЕРИОД ДАТ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.width(160.dp))
+                            Text("ПЕРИОД ДАТ (ПО ПОРЯДКУ)", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.width(170.dp))
                             Text("ПОЕЗД", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.width(90.dp))
                             Text("ПО АФИШЕ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.width(100.dp))
                             Text("СТАТУС ИЗМЕНЕНИЙ ПО ТЕЛЕГРАММЕ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.weight(1f))
@@ -827,7 +844,7 @@ fun App() {
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp,
                                             color = AppTheme.CorporateBlue,
-                                            modifier = Modifier.width(160.dp)
+                                            modifier = Modifier.width(170.dp)
                                         )
 
                                         Text(
@@ -920,7 +937,7 @@ fun DocUploadCard(title: String, desc: String, isLoaded: Boolean, color: Color, 
 fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
-        title = "ScheduleVerifier PRO — Экспертный ревизор расписаний"
+        title = "ScheduleVerifier PRO — Хронологический ревизор расписаний"
     ) {
         App()
     }
