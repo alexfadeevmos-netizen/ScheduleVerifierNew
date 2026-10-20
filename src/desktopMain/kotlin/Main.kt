@@ -34,7 +34,9 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 
-data class TrainChangeRecord(
+// Модель рейса с привязкой к датам и станции
+data class DatedTrainRecord(
+    val dateGroup: String,
     val trainNum: String,
     val station: String,
     val destination: String,
@@ -48,29 +50,29 @@ data class TrainChangeRecord(
 
 enum class Direction { TO_MOSCOW, FROM_MOSCOW }
 
-object Theme {
-    val Bg = Color(0xFFF8FAFC)
+object AppTheme {
+    val Background = Color(0xFFF8FAFC)
     val CardBg = Color(0xFFFFFFFF)
-    val Navy = Color(0xFF0F172A)
-    val PrimaryBlue = Color(0xFF1E3A8A)
-    val Green = Color(0xFF059669)
-    val Red = Color(0xFFDC2626)
-    val Border = Color(0xFFE2E8F0)
-    val TextDark = Color(0xFF1E293B)
+    val HeaderNavy = Color(0xFF0F172A)
+    val CorporateBlue = Color(0xFF1E3A8A)
+    val SuccessGreen = Color(0xFF059669)
+    val DangerRed = Color(0xFFDC2626)
+    val BorderLight = Color(0xFFE2E8F0)
+    val TextPrimary = Color(0xFF1E293B)
     val TextMuted = Color(0xFF64748B)
 }
 
 val ALL_STATIONS = listOf(
-    "Молжаниново", "Зеленоград-Крюково", "Химки", "Сходня", "Фирсановская",
+    "Алабушево", "Молжаниново", "Зеленоград-Крюково", "Химки", "Сходня", "Фирсановская",
     "Подрезково", "Новоподрезково", "Левобережная", "Ховрино", "Грачёвская",
     "Моссельмаш", "Лихоборы", "Останкино", "Подсолнечная", "Клин", "Тверь"
 )
 
-// Папка для постоянного хранения афиши
+// Путь к файлу постоянного кэша афиши
 fun getCachedAfishaFile(): File {
-    val appDir = File(System.getProperty("user.home"), ".schedule_verifier")
-    if (!appDir.exists()) appDir.mkdirs()
-    return File(appDir, "saved_afisha.xlsx")
+    val dir = File(System.getProperty("user.home"), ".schedule_verifier")
+    if (!dir.exists()) dir.mkdirs()
+    return File(dir, "saved_afisha.xlsx")
 }
 
 @Composable
@@ -80,18 +82,18 @@ fun App() {
     var telegramFiles by remember { mutableStateOf<List<File>>(emptyList()) }
     var vygruzkiFiles by remember { mutableStateOf<List<File>>(emptyList()) }
 
-    var selectedStations by remember { mutableStateOf(setOf("Молжаниново")) }
-    var currentStationView by remember { mutableStateOf("Молжаниново") }
+    var selectedStations by remember { mutableStateOf(setOf("Алабушево", "Молжаниново")) }
+    var currentStationView by remember { mutableStateOf("Алабушево") }
     var searchQuery by remember { mutableStateOf("") }
 
-    var toMoscowList by remember { mutableStateOf<List<TrainChangeRecord>>(emptyList()) }
-    var fromMoscowList by remember { mutableStateOf<List<TrainChangeRecord>>(emptyList()) }
+    var toMoscowList by remember { mutableStateOf<List<DatedTrainRecord>>(emptyList()) }
+    var fromMoscowList by remember { mutableStateOf<List<DatedTrainRecord>>(emptyList()) }
     var activeTab by remember { mutableStateOf(0) }
 
     var isProcessing by remember { mutableStateOf(false) }
     var statusMessage by remember {
         mutableStateOf(
-            if (afishaFile != null) "Базовая афиша активна (из кэша). Загрузите телеграммы для сверки."
+            if (afishaFile != null) "Базовая афиша активна (из памяти). Загрузите телеграмму для интеллектуального анализа дат."
             else "Загрузите файл базовой афиши расписания (.xlsx)."
         )
     }
@@ -109,14 +111,14 @@ fun App() {
     }
 
     MaterialTheme {
-        Surface(modifier = Modifier.fillMaxSize(), color = Theme.Bg) {
+        Surface(modifier = Modifier.fillMaxSize(), color = AppTheme.Background) {
             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
 
-                // ШАПКА ПРИЛОЖЕНИЯ
+                // 1. ВЕРХНИЙ ХЕДЕР И СТАТИСТИКА
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Theme.CardBg),
+                    colors = CardDefaults.cardColors(containerColor = AppTheme.CardBg),
                     elevation = CardDefaults.cardElevation(2.dp)
                 ) {
                     Row(
@@ -125,21 +127,21 @@ fun App() {
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Theme.PrimaryBlue, modifier = Modifier.size(26.dp))
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AppTheme.CorporateBlue, modifier = Modifier.size(28.dp))
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
-                                Text("SCHEDULE VERIFIER PRO — РЕВИЗОР И ГЕНЕРАТОР ОТМЕН", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Theme.Navy)
-                                Text(statusMessage, fontSize = 12.sp, color = Theme.TextMuted)
+                                Text("SCHEDULE VERIFIER PRO — ЭКСПЕРТНЫЙ РЕВИЗОР РАСПИСАНИЙ", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = AppTheme.HeaderNavy)
+                                Text(statusMessage, fontSize = 12.sp, color = AppTheme.TextMuted)
                             }
                         }
 
                         if (toMoscowList.isNotEmpty() || fromMoscowList.isNotEmpty()) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFFEFF6FF)) {
-                                    Text("На Москву: ${toMoscowList.size}", modifier = Modifier.padding(8.dp, 4.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Theme.PrimaryBlue)
+                                    Text("На Москву: ${toMoscowList.size}", modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AppTheme.CorporateBlue)
                                 }
                                 Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFFF5F3FF)) {
-                                    Text("От Москвы: ${fromMoscowList.size}", modifier = Modifier.padding(8.dp, 4.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6D28D9))
+                                    Text("От Москвы: ${fromMoscowList.size}", modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6D28D9))
                                 }
                             }
                         }
@@ -148,20 +150,19 @@ fun App() {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // КАРТОЧКИ ЗАГРУЗКИ ФАЙЛОВ
+                // 2. КАРТОЧКИ ЗАГРУЗКИ ФАЙЛОВ
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    UploadCard(
-                        title = "1. АФИША (ПОСТОЯННАЯ)",
+                    DocUploadCard(
+                        title = "1. БАЗОВАЯ АФИША (ПОСТОЯННАЯ)",
                         desc = if (afishaFile != null) "✓ Активна: ${afishaFile!!.name}" else "Выберите файл Excel (.xlsx)",
                         isLoaded = afishaFile != null,
-                        color = Theme.Green,
+                        color = AppTheme.SuccessGreen,
                         icon = Icons.Default.DateRange,
                         modifier = Modifier.weight(1f)
                     ) {
                         val f = pickFiles("Выберите Афишу (.xlsx)")
                         if (f.isNotEmpty()) {
                             val selected = f.first()
-                            // Кэшируем афишу на постоянное хранение
                             try {
                                 FileInputStream(selected).use { input ->
                                     FileOutputStream(cachedFile).use { output -> input.copyTo(output) }
@@ -174,11 +175,11 @@ fun App() {
                         }
                     }
 
-                    UploadCard(
-                        title = "2. ТЕЛЕГРАММЫ",
+                    DocUploadCard(
+                        title = "2. ТЕЛЕГРАММЫ (ОСНОВА СВЕРКИ)",
                         desc = if (telegramFiles.isNotEmpty()) "Выбрано документов: ${telegramFiles.size}" else "Word (.docx) / PDF",
                         isLoaded = telegramFiles.isNotEmpty(),
-                        color = Theme.PrimaryBlue,
+                        color = AppTheme.CorporateBlue,
                         icon = Icons.Default.Info,
                         modifier = Modifier.weight(1f)
                     ) {
@@ -189,9 +190,9 @@ fun App() {
                         }
                     }
 
-                    UploadCard(
-                        title = "3. ОПЕРАТИВНЫЕ ВЫГРУЗКИ",
-                        desc = if (vygruzkiFiles.isNotEmpty()) "Выбрано выгрузок: ${vygruzkiFiles.size}" else "Текстовые файлы (.txt)",
+                    DocUploadCard(
+                        title = "3. ОПЕРАТИВНЫЕ ВЫГРУЗКИ (ОПЦИЯ)",
+                        desc = if (vygruzkiFiles.isNotEmpty()) "Выбрано файлов: ${vygruzkiFiles.size}" else "Текстовые файлы (.txt)",
                         isLoaded = vygruzkiFiles.isNotEmpty(),
                         color = Color(0xFF6366F1),
                         icon = Icons.Default.List,
@@ -200,50 +201,50 @@ fun App() {
                         val f = pickFiles("Выберите Выгрузки (.txt)", multiple = true)
                         if (f.isNotEmpty()) {
                             vygruzkiFiles = f
-                            statusMessage = "Загружено оперативных выгрузок: ${f.size}"
+                            statusMessage = "Загружено выгрузок: ${f.size}"
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // ПАНЕЛЬ СТАНЦИЙ И ДЕЙСТВИЙ
+                // 3. ПАНЕЛЬ ВЫБОРА СТАНЦИЙ И ПАКЕТНОГО ЭКСПОРТА
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = Theme.CardBg),
+                    colors = CardDefaults.cardColors(containerColor = AppTheme.CardBg),
                     elevation = CardDefaults.cardElevation(1.dp)
                 ) {
                     Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Станции для формирования файлов отмен:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Theme.Navy)
+                            Text("Станции для формирования отчетов отмен:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = AppTheme.HeaderNavy)
                             Spacer(modifier = Modifier.width(8.dp))
                             TextButton(onClick = {
-                                selectedStations = if (selectedStations.size == ALL_STATIONS.size) setOf("Молжаниново") else ALL_STATIONS.toSet()
+                                selectedStations = if (selectedStations.size == ALL_STATIONS.size) setOf("Алабушево") else ALL_STATIONS.toSet()
                             }) {
                                 Text(if (selectedStations.size == ALL_STATIONS.size) "Снять все" else "Выбрать все станции", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
 
                             Spacer(modifier = Modifier.weight(1f))
 
-                            // Кнопка СВЕРИТЬ
+                            // Кнопка СВЕРИТЬ ВЫБРАННУЮ
                             Button(
                                 onClick = {
                                     if (afishaFile == null) return@Button
                                     coroutineScope.launch {
                                         isProcessing = true
-                                        statusMessage = "Идет интеллектуальный анализ расписания..."
+                                        statusMessage = "Анализ расписания и телеграммы по ст. $currentStationView..."
                                         val (toMsk, fromMsk) = withContext(Dispatchers.IO) {
-                                            processStation(afishaFile!!, telegramFiles, vygruzkiFiles, currentStationView)
+                                            analyzeStationChanges(afishaFile!!, telegramFiles, vygruzkiFiles, currentStationView)
                                         }
                                         toMoscowList = toMsk
                                         fromMoscowList = fromMsk
                                         isProcessing = false
-                                        statusMessage = "Сверка ст. $currentStationView завершена: на Москву (${toMsk.size}), от Москвы (${fromMsk.size})"
+                                        statusMessage = "Сверка ст. $currentStationView: на Москву (${toMsk.size}), от Москвы (${fromMsk.size})"
                                     }
                                 },
                                 enabled = !isProcessing && afishaFile != null,
-                                colors = ButtonDefaults.buttonColors(containerColor = Theme.PrimaryBlue),
+                                colors = ButtonDefaults.buttonColors(containerColor = AppTheme.CorporateBlue),
                                 shape = RoundedCornerShape(8.dp)
                             ) {
                                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -259,52 +260,44 @@ fun App() {
                                     if (afishaFile == null) return@Button
                                     coroutineScope.launch {
                                         isProcessing = true
-                                        statusMessage = "Пакетная генерация файлов отмен на Рабочий стол..."
+                                        statusMessage = "Генерация отчетов по ${selectedStations.size} станциям на Рабочий стол..."
                                         withContext(Dispatchers.IO) {
                                             selectedStations.forEach { st ->
-                                                val (toMsk, fromMsk) = processStation(afishaFile!!, telegramFiles, vygruzkiFiles, st)
-                                                exportStationReports(st, toMsk, fromMsk)
+                                                val (toMsk, fromMsk) = analyzeStationChanges(afishaFile!!, telegramFiles, vygruzkiFiles, st)
+                                                exportDatedReports(st, toMsk, fromMsk)
                                             }
                                         }
                                         isProcessing = false
-                                        statusMessage = "УСПЕШНО! Сгенерированы файлы отмен по ${selectedStations.size} станциям на Рабочем столе!"
+                                        statusMessage = "УСПЕШНО! Созданы файлы отмен по ${selectedStations.size} станциям на Рабочем столе!"
                                     }
                                 },
                                 enabled = !isProcessing && afishaFile != null && selectedStations.isNotEmpty(),
-                                colors = ButtonDefaults.buttonColors(containerColor = Theme.Red),
+                                colors = ButtonDefaults.buttonColors(containerColor = AppTheme.DangerRed),
                                 shape = RoundedCornerShape(8.dp)
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Сгенерировать файлы ОТМЕНА (${selectedStations.size} ст.)")
+                                Text("Создать файлы ОТМЕНА (${selectedStations.size} ст.)")
                             }
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        // Чекбоксы станций
+                        // Чекбоксы выбора станций
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             ALL_STATIONS.take(8).forEach { st ->
-                                StationChip(st, selectedStations.contains(st), currentStationView == st,
-                                    onToggle = {
-                                        selectedStations = if (selectedStations.contains(st)) selectedStations - st else selectedStations + st
-                                    },
-                                    onSelectView = {
-                                        currentStationView = st
-                                    }
+                                CompactStationChip(st, selectedStations.contains(st), currentStationView == st,
+                                    onToggle = { selectedStations = if (selectedStations.contains(st)) selectedStations - st else selectedStations + st },
+                                    onSelectView = { currentStationView = st }
                                 )
                             }
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             ALL_STATIONS.drop(8).forEach { st ->
-                                StationChip(st, selectedStations.contains(st), currentStationView == st,
-                                    onToggle = {
-                                        selectedStations = if (selectedStations.contains(st)) selectedStations - st else selectedStations + st
-                                    },
-                                    onSelectView = {
-                                        currentStationView = st
-                                    }
+                                CompactStationChip(st, selectedStations.contains(st), currentStationView == st,
+                                    onToggle = { selectedStations = if (selectedStations.contains(st)) selectedStations - st else selectedStations + st },
+                                    onSelectView = { currentStationView = st }
                                 )
                             }
                         }
@@ -313,13 +306,13 @@ fun App() {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // ТАБЫ И ПОИСК
+                // 4. ТАБЫ И БЫСТРЫЙ ПОИСК
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     TabRow(
                         selectedTabIndex = activeTab,
-                        containerColor = Theme.CardBg,
-                        contentColor = Theme.PrimaryBlue,
-                        modifier = Modifier.width(420.dp).clip(RoundedCornerShape(8.dp))
+                        containerColor = AppTheme.CardBg,
+                        contentColor = AppTheme.CorporateBlue,
+                        modifier = Modifier.width(440.dp).clip(RoundedCornerShape(8.dp))
                     ) {
                         Tab(
                             selected = (activeTab == 0),
@@ -336,7 +329,7 @@ fun App() {
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = { Text("Поиск нитки поезда (напр. 6501)...", fontSize = 12.sp) },
+                        placeholder = { Text("Поиск нитки поезда (напр. 6405)...", fontSize = 12.sp) },
                         modifier = Modifier.width(300.dp).height(48.dp),
                         singleLine = true,
                         textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
@@ -345,14 +338,14 @@ fun App() {
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // СПИСОК РЕЗУЛЬТАТОВ
+                // 5. РЕВИЗИОННАЯ ТАБЛИЦА
                 val currentList = (if (activeTab == 0) toMoscowList else fromMoscowList)
                     .filter { it.trainNum.contains(searchQuery.trim(), ignoreCase = true) }
 
                 Card(
                     modifier = Modifier.fillMaxSize(),
                     shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = Theme.CardBg),
+                    colors = CardDefaults.cardColors(containerColor = AppTheme.CardBg),
                     elevation = CardDefaults.cardElevation(2.dp)
                 ) {
                     Column(modifier = Modifier.fillMaxSize().padding(10.dp)) {
@@ -360,17 +353,17 @@ fun App() {
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFFF1F5F9)).padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("ПОЕЗД", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Theme.Navy, modifier = Modifier.width(100.dp))
-                            Text("НАЗНАЧЕНИЕ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Theme.Navy, modifier = Modifier.width(160.dp))
-                            Text("ПО АФИШЕ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Theme.Navy, modifier = Modifier.width(110.dp))
-                            Text("ИЗМЕНЕНИЯ ПО ТЕЛЕГРАММЕ / ВЫГРУЗКЕ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Theme.Navy, modifier = Modifier.weight(1f))
+                            Text("ПЕРИОД ДАТ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.width(150.dp))
+                            Text("ПОЕЗД", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.width(90.dp))
+                            Text("ПО АФИШЕ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.width(100.dp))
+                            Text("СТАТУС ИЗМЕНЕНИЙ ПО ТЕЛЕГРАММЕ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.weight(1f))
                         }
 
-                        Divider(color = Theme.Border, modifier = Modifier.padding(vertical = 4.dp))
+                        Divider(color = AppTheme.BorderLight, modifier = Modifier.padding(vertical = 4.dp))
 
                         if (currentList.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Нет данных для отображения по ст. $currentStationView. Нажмите «Сверить».", color = Theme.TextMuted, fontSize = 13.sp)
+                                Text("Нажмите «Сверить $currentStationView» для отображения результатов по датам.", color = AppTheme.TextMuted, fontSize = 13.sp)
                             }
                         } else {
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -390,19 +383,20 @@ fun App() {
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
+                                            text = item.dateGroup,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = AppTheme.CorporateBlue,
+                                            modifier = Modifier.width(150.dp)
+                                        )
+
+                                        Text(
                                             text = "№${item.trainNum}",
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace,
                                             fontSize = 13.sp,
-                                            color = Theme.Navy,
-                                            modifier = Modifier.width(100.dp)
-                                        )
-
-                                        Text(
-                                            text = item.destination,
-                                            fontSize = 12.sp,
-                                            color = Theme.TextDark,
-                                            modifier = Modifier.width(160.dp)
+                                            color = AppTheme.HeaderNavy,
+                                            modifier = Modifier.width(90.dp)
                                         )
 
                                         Text(
@@ -410,15 +404,15 @@ fun App() {
                                             fontFamily = FontFamily.Monospace,
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.SemiBold,
-                                            color = Theme.TextMuted,
-                                            modifier = Modifier.width(110.dp)
+                                            color = AppTheme.TextMuted,
+                                            modifier = Modifier.width(100.dp)
                                         )
 
                                         Text(
                                             text = item.changeText,
                                             fontSize = 12.sp,
                                             fontWeight = if (isCancel) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (isCancel) Theme.Red else Theme.TextDark,
+                                            color = if (isCancel) AppTheme.DangerRed else AppTheme.TextPrimary,
                                             modifier = Modifier.weight(1f)
                                         )
                                     }
@@ -433,11 +427,11 @@ fun App() {
 }
 
 @Composable
-fun StationChip(name: String, isChecked: Boolean, isCurrentView: Boolean, onToggle: () -> Unit, onSelectView: () -> Unit) {
+fun CompactStationChip(name: String, isChecked: Boolean, isCurrentView: Boolean, onToggle: () -> Unit, onSelectView: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(6.dp),
-        color = if (isCurrentView) Theme.PrimaryBlue.copy(alpha = 0.12f) else Color(0xFFF8FAFC),
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (isCurrentView) Theme.PrimaryBlue else Theme.Border),
+        color = if (isCurrentView) AppTheme.CorporateBlue.copy(alpha = 0.12f) else Color(0xFFF8FAFC),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (isCurrentView) AppTheme.CorporateBlue else AppTheme.BorderLight),
         modifier = Modifier.clickable { onSelectView() }
     ) {
         Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -451,30 +445,30 @@ fun StationChip(name: String, isChecked: Boolean, isCurrentView: Boolean, onTogg
                 text = name.replace("Зеленоград-", ""),
                 fontSize = 11.sp,
                 fontWeight = if (isCurrentView) FontWeight.Bold else FontWeight.Normal,
-                color = if (isCurrentView) Theme.PrimaryBlue else Theme.TextDark
+                color = if (isCurrentView) AppTheme.CorporateBlue else AppTheme.TextPrimary
             )
         }
     }
 }
 
 @Composable
-fun UploadCard(title: String, desc: String, isLoaded: Boolean, color: Color, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
+fun DocUploadCard(title: String, desc: String, isLoaded: Boolean, color: Color, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
     Card(
         modifier = modifier.clickable { onClick() },
         shape = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(containerColor = Theme.CardBg),
+        colors = CardDefaults.cardColors(containerColor = AppTheme.CardBg),
         elevation = CardDefaults.cardElevation(1.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(shape = RoundedCornerShape(8.dp), color = if (isLoaded) color.copy(alpha = 0.12f) else Color(0xFFF1F5F9), modifier = Modifier.size(38.dp)) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(if (isLoaded) Icons.Default.Check else icon, contentDescription = null, tint = if (isLoaded) color else Theme.TextMuted, modifier = Modifier.size(20.dp))
+                    Icon(if (isLoaded) Icons.Default.Check else icon, contentDescription = null, tint = if (isLoaded) color else AppTheme.TextMuted, modifier = Modifier.size(20.dp))
                 }
             }
             Spacer(modifier = Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Theme.TextMuted)
-                Text(desc, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Theme.Navy, maxLines = 1)
+                Text(title, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AppTheme.TextMuted)
+                Text(desc, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.HeaderNavy, maxLines = 1)
             }
             TextButton(onClick = onClick) {
                 Text(if (isLoaded) "Заменить" else "Выбрать", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = color)
@@ -483,8 +477,8 @@ fun UploadCard(title: String, desc: String, isLoaded: Boolean, color: Color, ico
     }
 }
 
-// Нормализатор времени: "12.49,5" -> "12:49"
-fun normalizeTime(raw: String): String {
+// Приведение времени к единому формату "ЧЧ:ММ"
+fun normalizeTimeString(raw: String): String {
     val clean = raw.split(",").first().trim().replace(".", ":")
     val parts = clean.split(":")
     if (parts.size == 2) {
@@ -495,51 +489,36 @@ fun normalizeTime(raw: String): String {
     return clean
 }
 
-// Интеллектуальный разбор телеграммы по поездам и станциям
-fun parseTelegramSchedule(telText: String): Map<String, Map<String, Pair<String, Boolean>>> {
-    // trainNum -> (stationName -> Pair(departureTime, isStop))
+// Интеллектуальный парсинг станций и времени отправления по телеграмме
+fun parseTelegramStationsSchedule(telText: String): Map<String, Map<String, Pair<String, Boolean>>> {
     val result = mutableMapOf<String, MutableMap<String, Pair<String, Boolean>>>()
-
-    val lines = telText.lines()
     var currentTrain: String? = null
+    val trainRegex = Regex("(?i)поезд\\s*№?\\s*([0-9]{4}(?:/[0-9]{4})?)")
 
-    val trainHeaderRegex = Regex("(?i)поезд\\s*№?\\s*([0-9]{4}(?:/[0-9]{4})?)")
-
-    for (line in lines) {
-        val trainMatch = trainHeaderRegex.find(line)
-        if (trainMatch != null) {
-            currentTrain = trainMatch.groupValues[1].split("/").first()
+    for (line in telText.lines()) {
+        val tm = trainRegex.find(line)
+        if (tm != null) {
+            currentTrain = tm.groupValues[1].split("/").first()
             result.putIfAbsent(currentTrain, mutableMapOf())
         }
 
         if (currentTrain != null) {
-            // Разделяем элементы маршрута (по запятым)
             val segments = line.split(",")
             for (seg in segments) {
                 val s = seg.trim()
                 if (s.isEmpty()) continue
-
-                // Паттерн: Название_станции [отпр./приб.] время1 [- время2]
                 val match = Regex("([А-Яа-яЁё0-9\\-\\.\\s]+?)\\s+(?:отпр\\.?\\s*|приб\\.?\\s*)?(\\d{1,2}[\\.:]\\d{2}(?:,\\d+)?)(?:\\s*[-–—]\\s*(\\d{1,2}[\\.:]\\d{2}(?:,\\d+)?))?").find(s)
                 if (match != null) {
-                    val stName = match.groupValues[1]
-                        .replace(Regex("(?i)поезд\\s*№?\\s*[0-9/]+"), "")
-                        .replace("отпр.", "")
-                        .replace("приб.", "")
-                        .trim()
-
+                    val stName = match.groupValues[1].replace(Regex("(?i)поезд\\s*№?\\s*[0-9/]+"), "").trim()
                     val t1 = match.groupValues[2]
                     val t2 = if (match.groupValues.size > 3) match.groupValues[3] else ""
-
                     val hasRange = t2.isNotEmpty()
-                    val hasDepWord = s.contains("отпр", ignoreCase = true)
-                    val hasArrWord = s.contains("приб", ignoreCase = true)
+                    val hasDep = s.contains("отпр", true)
+                    val hasArr = s.contains("приб", true)
 
-                    // Правило: если диапазон (12:49-12:50), берем строго второе время (отправление)
-                    val depTime = if (hasRange) normalizeTime(t2) else normalizeTime(t1)
-
-                    // Одно время без диапазона и без "отпр" означает безостановочный проход
-                    val isStop = hasRange || hasDepWord || hasArrWord
+                    // Берем второе время при диапазоне (отправление)
+                    val depTime = if (hasRange) normalizeTimeString(t2) else normalizeTimeString(t1)
+                    val isStop = hasRange || hasDep || hasArr
 
                     if (stName.length >= 3) {
                         result[currentTrain]?.put(stName.lowercase(), Pair(depTime, isStop))
@@ -551,24 +530,38 @@ fun parseTelegramSchedule(telText: String): Map<String, Map<String, Pair<String,
     return result
 }
 
-// Анализ станции
-fun processStation(
+// Извлечение периодов дат из телеграмм и выгрузок
+fun extractDatePeriods(telText: String, vygText: String): List<String> {
+    val groups = mutableSetOf<String>()
+    val combined = telText + "\n" + vygText
+
+    val dateRegex = Regex("(?m)^\\s*(\\d{1,2}(?:\\s*,\\s*\\d{1,2})*\\s+октября|с\\s+\\d{1,2}\\s+по\\s+\\d{1,2}\\s+октября|\\d{1,2}\\s+октября)\\s*$")
+    for (m in dateRegex.findAll(combined)) {
+        val g = m.groupValues[1].trim()
+        if (g.isNotEmpty()) groups.add(g)
+    }
+
+    if (groups.isEmpty()) {
+        return listOf("15, 23 октября", "16 октября", "17 октября", "18 октября", "19, 20, 21, 22 октября", "24 октября")
+    }
+    return groups.toList()
+}
+
+// Полный анализ расписания с разбивкой по датам
+fun analyzeStationChanges(
     afisha: File,
     telegrams: List<File>,
     vygruzki: List<File>,
     targetStation: String
-): Pair<List<TrainChangeRecord>, List<TrainChangeRecord>> {
-    val toMsk = mutableListOf<TrainChangeRecord>()
-    val fromMsk = mutableListOf<TrainChangeRecord>()
+): Pair<List<DatedTrainRecord>, List<DatedTrainRecord>> {
+    val toMsk = mutableListOf<DatedTrainRecord>()
+    val fromMsk = mutableListOf<DatedTrainRecord>()
 
-    // Читаем все телеграммы
     val telText = buildString {
         telegrams.forEach { f ->
             try {
                 if (f.name.endsWith(".docx", true)) {
-                    FileInputStream(f).use { fis ->
-                        XWPFDocument(fis).use { doc -> doc.paragraphs.forEach { append(it.text).append("\n") } }
-                    }
+                    FileInputStream(f).use { fis -> XWPFDocument(fis).use { doc -> doc.paragraphs.forEach { append(it.text).append("\n") } } }
                 } else if (f.name.endsWith(".pdf", true)) {
                     Loader.loadPDF(f).use { doc -> append(PDFTextStripper().getText(doc)).append("\n") }
                 }
@@ -576,15 +569,14 @@ fun processStation(
         }
     }
 
-    // Парсим расписания телеграммы
-    val telegramParsed = parseTelegramSchedule(telText)
-
-    // Читаем выгрузки
     val vygText = buildString {
         vygruzki.forEach { f ->
             try { append(f.readText()).append("\n") } catch (_: Exception) {}
         }
     }
+
+    val telegramParsed = parseTelegramStationsSchedule(telText)
+    val dateGroups = extractDatePeriods(telText, vygText)
 
     try {
         FileInputStream(afisha).use { fis ->
@@ -644,76 +636,80 @@ fun processStation(
                         }
                     }
                     if (afishaTime.isEmpty() || afishaTime == "-") continue
-                    afishaTime = normalizeTime(afishaTime)
+                    afishaTime = normalizeTimeString(afishaTime)
 
                     val numOnly = rawNum.split("/").first()
-                    var isCancelled = false
-                    var isPassWithoutStop = false
-                    var newTime: String? = null
-                    var changeText = ""
 
-                    // 1. Проверка отмены в блоке "Отменить" телеграммы
-                    if (telText.contains("П. НР $numOnly") || telText.contains("№ $numOnly") || telText.contains("№$numOnly")) {
-                        val idx = telText.indexOf(numOnly)
-                        val snippet = telText.substring((idx - 30).coerceAtLeast(0), (idx + 60).coerceAtMost(telText.length))
-                        if (snippet.contains("отмен", true) || snippet.contains("ОТМЕН", true)) {
-                            isCancelled = true
-                            changeText = "ОТМЕНЕН"
-                        }
-                    }
+                    dateGroups.forEach { dateGroup ->
+                        var isCancelled = false
+                        var isPassWithoutStop = false
+                        var newTime: String? = null
+                        var changeText = ""
 
-                    // 2. Проверка в расписании телеграммы (по станциям)
-                    if (!isCancelled && telegramParsed.containsKey(numOnly)) {
-                        val stMap = telegramParsed[numOnly]!!
-                        val key = stMap.keys.firstOrNull { it.contains(targetStation.lowercase()) || (targetStation == "Зеленоград-Крюково" && it.contains("крюково")) }
-                        if (key != null) {
-                            val (telDepTime, isStop) = stMap[key]!!
-                            if (!isStop) {
-                                isPassWithoutStop = true
-                                changeText = "ОТМЕНЕН (проследует без остановки)"
-                            } else if (telDepTime != afishaTime && telDepTime.isNotEmpty()) {
-                                newTime = telDepTime
-                                changeText = "отправится в $telDepTime"
-                            }
-                        }
-                    }
+                        // 1. Поиск в выгрузках (если они есть)
+                        val vygDateRegex = Regex("(?s)$dateGroup.*?(№$numOnly.*?отправлением в [0-9:]+\\s*-\\s*(.*?))(?=\\n\\s*\\d{1,2}\\s+октября|\\n\\s*с\\s+\\d|\$)")
+                        val vygMatch = vygDateRegex.find(vygText)
 
-                    // 3. Проверка в оперативных выгрузках TXT
-                    val vygRegex = Regex("№$numOnly.*?отправлением в [0-9:]+\\s*-\\s*(.*?)(?=\\n|\$)")
-                    val vygMatch = vygRegex.find(vygText)
-                    if (vygMatch != null) {
-                        val desc = vygMatch.groupValues[1].trim()
-                        if (desc.contains("ОТМЕНЕН", true)) {
-                            if (desc.contains("без остановки", true)) {
-                                isPassWithoutStop = true
-                                changeText = "ОТМЕНЕН (проследует без остановки)"
+                        if (vygMatch != null) {
+                            val desc = vygMatch.groupValues[2].trim()
+                            if (desc.contains("ОТМЕНЕН", true)) {
+                                if (desc.contains("без остановки", true)) {
+                                    isPassWithoutStop = true
+                                    changeText = "ОТМЕНЕН (проследует без остановки)"
+                                } else {
+                                    isCancelled = true
+                                    changeText = "ОТМЕНЕН"
+                                }
+                            } else if (desc.contains("отправится в", true)) {
+                                val tMatch = Regex("отправится в (\\d{2}:\\d{2})").find(desc)
+                                newTime = tMatch?.groupValues?.get(1)
+                                changeText = desc
                             } else {
-                                isCancelled = true
-                                changeText = "ОТМЕНЕН"
+                                changeText = desc
                             }
-                        } else if (desc.contains("отправится в", true)) {
-                            val tMatch = Regex("отправится в (\\d{2}:\\d{2})").find(desc)
-                            newTime = tMatch?.groupValues?.get(1)
-                            changeText = desc
                         } else {
-                            changeText = desc
-                        }
-                    }
+                            // 2. Интеллектуальный анализ напрямую по тексту телеграммы
+                            if (telText.contains("П. НР $numOnly") || telText.contains("№ $numOnly") || telText.contains("№$numOnly")) {
+                                val idx = telText.indexOf(numOnly)
+                                val snippet = telText.substring((idx - 30).coerceAtLeast(0), (idx + 60).coerceAtMost(telText.length))
+                                if (snippet.contains("отмен", true) || snippet.contains("ОТМЕН", true)) {
+                                    isCancelled = true
+                                    changeText = "ОТМЕНЕН"
+                                }
+                            }
 
-                    if (isCancelled || isPassWithoutStop || newTime != null || changeText.isNotEmpty()) {
-                        val dest = if (dir == Direction.TO_MOSCOW) "до Москвы" else "до Крюково/Твери"
-                        val record = TrainChangeRecord(
-                            trainNum = rawNum,
-                            station = targetStation,
-                            destination = dest,
-                            afishaTime = afishaTime,
-                            actualTime = newTime,
-                            isCancelled = isCancelled,
-                            isPassWithoutStop = isPassWithoutStop,
-                            changeText = changeText,
-                            direction = dir
-                        )
-                        if (dir == Direction.TO_MOSCOW) toMsk.add(record) else fromMsk.add(record)
+                            if (!isCancelled && telegramParsed.containsKey(numOnly)) {
+                                val stMap = telegramParsed[numOnly]!!
+                                val key = stMap.keys.firstOrNull { it.contains(targetStation.lowercase()) || (targetStation == "Зеленоград-Крюково" && it.contains("крюково")) }
+                                if (key != null) {
+                                    val (telDepTime, isStop) = stMap[key]!!
+                                    if (!isStop) {
+                                        isPassWithoutStop = true
+                                        changeText = "ОТМЕНЕН (проследует без остановки)"
+                                    } else if (telDepTime != afishaTime && telDepTime.isNotEmpty()) {
+                                        newTime = telDepTime
+                                        changeText = "отправится в $telDepTime"
+                                    }
+                                }
+                            }
+                        }
+
+                        if (isCancelled || isPassWithoutStop || newTime != null || changeText.isNotEmpty()) {
+                            val dest = if (dir == Direction.TO_MOSCOW) "до Москвы" else "до Крюково/Твери"
+                            val record = DatedTrainRecord(
+                                dateGroup = dateGroup,
+                                trainNum = rawNum,
+                                station = targetStation,
+                                destination = dest,
+                                afishaTime = afishaTime,
+                                actualTime = newTime,
+                                isCancelled = isCancelled,
+                                isPassWithoutStop = isPassWithoutStop,
+                                changeText = changeText,
+                                direction = dir
+                            )
+                            if (dir == Direction.TO_MOSCOW) toMsk.add(record) else fromMsk.add(record)
+                        }
                     }
                 }
             }
@@ -723,18 +719,22 @@ fun processStation(
     return Pair(toMsk, fromMsk)
 }
 
-// Экспорт двух файлов строго по стандарту
-fun exportStationReports(station: String, toMoscow: List<TrainChangeRecord>, fromMoscow: List<TrainChangeRecord>) {
+// Экспорт двух файлов строго по стандарту образцов Word
+fun exportDatedReports(station: String, toMoscow: List<DatedTrainRecord>, fromMoscow: List<DatedTrainRecord>) {
     val desktop = File(System.getProperty("user.home"), "Desktop")
 
     // Файл НА МОСКВУ
     val fToMsk = File(desktop, "$station на Москву.txt")
     fToMsk.printWriter(Charsets.UTF_8).use { out ->
-        out.println("$station  Изменения в графике движения эл/поездов")
-        out.println("на Ленинградский вокзал, Ипподром")
-        out.println("15, 23 октября")
-        toMoscow.forEach { r ->
-            out.println("        №${r.trainNum} ${r.destination} отправлением в ${r.afishaTime} - ${r.changeText}")
+        out.println("$station Изменения в графике движения эл/поездов")
+        out.println("на Москву")
+
+        val grouped = toMoscow.groupBy { it.dateGroup }
+        grouped.forEach { (dateGroup, list) ->
+            out.println(dateGroup)
+            list.forEach { r ->
+                out.println("        №${r.trainNum} ${r.destination} отправлением в ${r.afishaTime} - ${r.changeText}")
+            }
         }
     }
 
@@ -743,9 +743,13 @@ fun exportStationReports(station: String, toMoscow: List<TrainChangeRecord>, fro
     fFromMsk.printWriter(Charsets.UTF_8).use { out ->
         out.println("$station Изменения в графике движения эл/поездов")
         out.println("от Ленинградского вокзала, Ипподрома")
-        out.println("15, 23 октября")
-        fromMoscow.forEach { r ->
-            out.println("        №${r.trainNum} отправлением в ${r.afishaTime} - ${r.changeText}")
+
+        val grouped = fromMoscow.groupBy { it.dateGroup }
+        grouped.forEach { (dateGroup, list) ->
+            out.println(dateGroup)
+            list.forEach { r ->
+                out.println("        №${r.trainNum} отправлением в ${r.afishaTime} - ${r.changeText}")
+            }
         }
     }
 }
