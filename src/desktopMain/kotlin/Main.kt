@@ -34,7 +34,6 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 
-// Модель рейса с привязкой к датам и станции
 data class DatedTrainRecord(
     val dateGroup: String,
     val trainNum: String,
@@ -68,11 +67,66 @@ val ALL_STATIONS = listOf(
     "Моссельмаш", "Лихоборы", "Останкино", "Подсолнечная", "Клин", "Тверь"
 )
 
-// Путь к файлу постоянного кэша афиши
 fun getCachedAfishaFile(): File {
     val dir = File(System.getProperty("user.home"), ".schedule_verifier")
     if (!dir.exists()) dir.mkdirs()
     return File(dir, "saved_afisha.xlsx")
+}
+
+// Нормализация названий станций с учетом ж/д сокращений и синонимов
+fun matchStationNames(target: String, candidate: String): Boolean {
+    val t = target.lowercase().replace("ё", "е").replace(" ", "").replace("-", "").replace(".", "")
+    val c = candidate.lowercase().replace("ё", "е").replace(" ", "").replace("-", "").replace(".", "")
+
+    if (t.isEmpty() || c.isEmpty()) return false
+    if (t in c || c in t) return true
+
+    val aliasMap = mapOf(
+        "левобереж" to listOf("левобережн", "левобережье"),
+        "крюков" to listOf("крюково", "зеленоград"),
+        "петр" to listOf("петр", "петровско", "разумовск"),
+        "покровк" to listOf("покровка"),
+        "фирсановск" to listOf("фирсановская"),
+        "подрезков" to listOf("подрезково"),
+        "новоподрезков" to listOf("новоподрезково"),
+        "молжанинов" to listOf("молжаниново"),
+        "химк" to listOf("химки"),
+        "сходн" to listOf("сходня"),
+        "ховрин" to listOf("ховрино"),
+        "грачевск" to listOf("грачевская", "грачевск"),
+        "моссельмаш" to listOf("моссельмаш"),
+        "лихобор" to listOf("лихоборы"),
+        "останкин" to listOf("останкино"),
+        "москв" to listOf("москва", "москвапасс", "москпасс"),
+        "алабушев" to listOf("алабушево"),
+        "радищев" to listOf("радищево"),
+        "поваровк" to listOf("поваровка"),
+        "поварово" to listOf("поварово"),
+        "березк" to listOf("березки"),
+        "подсолнечн" to listOf("подсолнечная"),
+        "клин" to listOf("клин"),
+        "твер" to listOf("тверь")
+    )
+
+    for ((stem, variants) in aliasMap) {
+        if (stem in t) {
+            for (v in variants) {
+                if (v in c) return true
+            }
+        }
+    }
+    return false
+}
+
+fun normalizeTimeString(raw: String): String {
+    val clean = raw.split(",").first().trim().replace(".", ":")
+    val parts = clean.split(":")
+    if (parts.size == 2) {
+        val h = parts[0].padStart(2, '0')
+        val m = parts[1].padStart(2, '0')
+        return "$h:$m"
+    }
+    return clean
 }
 
 @Composable
@@ -82,8 +136,8 @@ fun App() {
     var telegramFiles by remember { mutableStateOf<List<File>>(emptyList()) }
     var vygruzkiFiles by remember { mutableStateOf<List<File>>(emptyList()) }
 
-    var selectedStations by remember { mutableStateOf(setOf("Алабушево", "Молжаниново")) }
-    var currentStationView by remember { mutableStateOf("Алабушево") }
+    var selectedStations by remember { mutableStateOf(setOf("Левобережная", "Молжаниново")) }
+    var currentStationView by remember { mutableStateOf("Левобережная") }
     var searchQuery by remember { mutableStateOf("") }
 
     var toMoscowList by remember { mutableStateOf<List<DatedTrainRecord>>(emptyList()) }
@@ -93,7 +147,7 @@ fun App() {
     var isProcessing by remember { mutableStateOf(false) }
     var statusMessage by remember {
         mutableStateOf(
-            if (afishaFile != null) "Базовая афиша активна (из памяти). Загрузите телеграмму для интеллектуального анализа дат."
+            if (afishaFile != null) "Базовая афиша активна. Нажмите «Сверить», чтобы увидеть расписание с приоритетом телеграмм."
             else "Загрузите файл базовой афиши расписания (.xlsx)."
         )
     }
@@ -114,7 +168,7 @@ fun App() {
         Surface(modifier = Modifier.fillMaxSize(), color = AppTheme.Background) {
             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
 
-                // 1. ВЕРХНИЙ ХЕДЕР И СТАТИСТИКА
+                // ШАПКА
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -150,7 +204,7 @@ fun App() {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // 2. КАРТОЧКИ ЗАГРУЗКИ ФАЙЛОВ
+                // КАРТОЧКИ ЗАГРУЗКИ
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     DocUploadCard(
                         title = "1. БАЗОВАЯ АФИША (ПОСТОЯННАЯ)",
@@ -191,7 +245,7 @@ fun App() {
                     }
 
                     DocUploadCard(
-                        title = "3. ОПЕРАТИВНЫЕ ВЫГРУЗКИ (ОПЦИЯ)",
+                        title = "3. ВЫГРУЗКИ (ОПЦИОНАЛЬНО)",
                         desc = if (vygruzkiFiles.isNotEmpty()) "Выбрано файлов: ${vygruzkiFiles.size}" else "Текстовые файлы (.txt)",
                         isLoaded = vygruzkiFiles.isNotEmpty(),
                         color = Color(0xFF6366F1),
@@ -208,7 +262,7 @@ fun App() {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // 3. ПАНЕЛЬ ВЫБОРА СТАНЦИЙ И ПАКЕТНОГО ЭКСПОРТА
+                // ПАНЕЛЬ СТАНЦИЙ И ДЕЙСТВИЙ
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
@@ -217,30 +271,29 @@ fun App() {
                 ) {
                     Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Станции для формирования отчетов отмен:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = AppTheme.HeaderNavy)
+                            Text("Станции полигона:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = AppTheme.HeaderNavy)
                             Spacer(modifier = Modifier.width(8.dp))
                             TextButton(onClick = {
-                                selectedStations = if (selectedStations.size == ALL_STATIONS.size) setOf("Алабушево") else ALL_STATIONS.toSet()
+                                selectedStations = if (selectedStations.size == ALL_STATIONS.size) setOf("Левобережная") else ALL_STATIONS.toSet()
                             }) {
                                 Text(if (selectedStations.size == ALL_STATIONS.size) "Снять все" else "Выбрать все станции", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
 
                             Spacer(modifier = Modifier.weight(1f))
 
-                            // Кнопка СВЕРИТЬ ВЫБРАННУЮ
                             Button(
                                 onClick = {
                                     if (afishaFile == null) return@Button
                                     coroutineScope.launch {
                                         isProcessing = true
-                                        statusMessage = "Анализ расписания и телеграммы по ст. $currentStationView..."
+                                        statusMessage = "Анализ расписания по ст. $currentStationView..."
                                         val (toMsk, fromMsk) = withContext(Dispatchers.IO) {
                                             analyzeStationChanges(afishaFile!!, telegramFiles, vygruzkiFiles, currentStationView)
                                         }
                                         toMoscowList = toMsk
                                         fromMoscowList = fromMsk
                                         isProcessing = false
-                                        statusMessage = "Сверка ст. $currentStationView: на Москву (${toMsk.size}), от Москвы (${fromMsk.size})"
+                                        statusMessage = "Сверка ст. $currentStationView завершена! На Москву: ${toMsk.size}, От Москвы: ${fromMsk.size}"
                                     }
                                 },
                                 enabled = !isProcessing && afishaFile != null,
@@ -254,13 +307,12 @@ fun App() {
 
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            // Кнопка ПАКЕТНОЙ ГЕНЕРАЦИИ
                             Button(
                                 onClick = {
                                     if (afishaFile == null) return@Button
                                     coroutineScope.launch {
                                         isProcessing = true
-                                        statusMessage = "Генерация отчетов по ${selectedStations.size} станциям на Рабочий стол..."
+                                        statusMessage = "Генерация отчетов по станциям на Рабочий стол..."
                                         withContext(Dispatchers.IO) {
                                             selectedStations.forEach { st ->
                                                 val (toMsk, fromMsk) = analyzeStationChanges(afishaFile!!, telegramFiles, vygruzkiFiles, st)
@@ -283,7 +335,6 @@ fun App() {
 
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        // Чекбоксы выбора станций
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             ALL_STATIONS.take(8).forEach { st ->
                                 CompactStationChip(st, selectedStations.contains(st), currentStationView == st,
@@ -306,7 +357,7 @@ fun App() {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // 4. ТАБЫ И БЫСТРЫЙ ПОИСК
+                // ТАБЫ И ПОИСК
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     TabRow(
                         selectedTabIndex = activeTab,
@@ -329,7 +380,7 @@ fun App() {
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = { Text("Поиск нитки поезда (напр. 6405)...", fontSize = 12.sp) },
+                        placeholder = { Text("Поиск нитки поезда (напр. 6101)...", fontSize = 12.sp) },
                         modifier = Modifier.width(300.dp).height(48.dp),
                         singleLine = true,
                         textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
@@ -338,7 +389,7 @@ fun App() {
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // 5. РЕВИЗИОННАЯ ТАБЛИЦА
+                // ТАБЛИЦА РЕЗУЛЬТАТОВ
                 val currentList = (if (activeTab == 0) toMoscowList else fromMoscowList)
                     .filter { it.trainNum.contains(searchQuery.trim(), ignoreCase = true) }
 
@@ -353,7 +404,7 @@ fun App() {
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFFF1F5F9)).padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("ПЕРИОД ДАТ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.width(150.dp))
+                            Text("ПЕРИОД ДАТ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.width(160.dp))
                             Text("ПОЕЗД", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.width(90.dp))
                             Text("ПО АФИШЕ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.width(100.dp))
                             Text("СТАТУС ИЗМЕНЕНИЙ ПО ТЕЛЕГРАММЕ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = AppTheme.HeaderNavy, modifier = Modifier.weight(1f))
@@ -387,7 +438,7 @@ fun App() {
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp,
                                             color = AppTheme.CorporateBlue,
-                                            modifier = Modifier.width(150.dp)
+                                            modifier = Modifier.width(160.dp)
                                         )
 
                                         Text(
@@ -477,19 +528,7 @@ fun DocUploadCard(title: String, desc: String, isLoaded: Boolean, color: Color, 
     }
 }
 
-// Приведение времени к единому формату "ЧЧ:ММ"
-fun normalizeTimeString(raw: String): String {
-    val clean = raw.split(",").first().trim().replace(".", ":")
-    val parts = clean.split(":")
-    if (parts.size == 2) {
-        val h = parts[0].padStart(2, '0')
-        val m = parts[1].padStart(2, '0')
-        return "$h:$m"
-    }
-    return clean
-}
-
-// Интеллектуальный парсинг станций и времени отправления по телеграмме
+// Парсер телеграммы: разбивает текст по поездам и станциям
 fun parseTelegramStationsSchedule(telText: String): Map<String, Map<String, Pair<String, Boolean>>> {
     val result = mutableMapOf<String, MutableMap<String, Pair<String, Boolean>>>()
     var currentTrain: String? = null
@@ -516,7 +555,6 @@ fun parseTelegramStationsSchedule(telText: String): Map<String, Map<String, Pair
                     val hasDep = s.contains("отпр", true)
                     val hasArr = s.contains("приб", true)
 
-                    // Берем второе время при диапазоне (отправление)
                     val depTime = if (hasRange) normalizeTimeString(t2) else normalizeTimeString(t1)
                     val isStop = hasRange || hasDep || hasArr
 
@@ -530,7 +568,7 @@ fun parseTelegramStationsSchedule(telText: String): Map<String, Map<String, Pair
     return result
 }
 
-// Извлечение периодов дат из телеграмм и выгрузок
+// Определение дат действия телеграммы
 fun extractDatePeriods(telText: String, vygText: String): List<String> {
     val groups = mutableSetOf<String>()
     val combined = telText + "\n" + vygText
@@ -542,12 +580,17 @@ fun extractDatePeriods(telText: String, vygText: String): List<String> {
     }
 
     if (groups.isEmpty()) {
-        return listOf("15, 23 октября", "16 октября", "17 октября", "18 октября", "19, 20, 21, 22 октября", "24 октября")
+        // Проверяем дату ввода в шапке телеграммы
+        val headerDate = Regex("(?i)с\\s*(\\d{1,2}\\s+[а-я]+(?:\\s*\\d{4})?\\s*г?\\.?)").find(telText)?.groupValues?.get(0)?.trim()
+        if (!headerDate.isNullOrEmpty()) {
+            return listOf(headerDate)
+        }
+        return listOf("с 25 октября 2026 г.")
     }
     return groups.toList()
 }
 
-// Полный анализ расписания с разбивкой по датам
+// Полноценный анализ расписания с разбивкой по датам
 fun analyzeStationChanges(
     afisha: File,
     telegrams: List<File>,
@@ -610,9 +653,7 @@ fun analyzeStationChanges(
                 for (r in trainRowIdx + 1..sheet.lastRowNum) {
                     val row = sheet.getRow(r) ?: continue
                     val name = row.getCell(0)?.toString()?.trim() ?: ""
-                    if (name.contains(targetStation, ignoreCase = true) ||
-                        (targetStation == "Зеленоград-Крюково" && (name.contains("Крюково", true) || name.contains("Зеленоград", true)))
-                    ) {
+                    if (matchStationNames(targetStation, name)) {
                         stationRowIdx = r
                         break
                     }
@@ -646,7 +687,7 @@ fun analyzeStationChanges(
                         var newTime: String? = null
                         var changeText = ""
 
-                        // 1. Поиск в выгрузках (если они есть)
+                        // 1. Поиск в выгрузках TXT
                         val vygDateRegex = Regex("(?s)$dateGroup.*?(№$numOnly.*?отправлением в [0-9:]+\\s*-\\s*(.*?))(?=\\n\\s*\\d{1,2}\\s+октября|\\n\\s*с\\s+\\d|\$)")
                         val vygMatch = vygDateRegex.find(vygText)
 
@@ -668,7 +709,7 @@ fun analyzeStationChanges(
                                 changeText = desc
                             }
                         } else {
-                            // 2. Интеллектуальный анализ напрямую по тексту телеграммы
+                            // 2. Интеллектуальный поиск напрямую в тексте телеграммы
                             if (telText.contains("П. НР $numOnly") || telText.contains("№ $numOnly") || telText.contains("№$numOnly")) {
                                 val idx = telText.indexOf(numOnly)
                                 val snippet = telText.substring((idx - 30).coerceAtLeast(0), (idx + 60).coerceAtMost(telText.length))
@@ -680,7 +721,7 @@ fun analyzeStationChanges(
 
                             if (!isCancelled && telegramParsed.containsKey(numOnly)) {
                                 val stMap = telegramParsed[numOnly]!!
-                                val key = stMap.keys.firstOrNull { it.contains(targetStation.lowercase()) || (targetStation == "Зеленоград-Крюково" && it.contains("крюково")) }
+                                val key = stMap.keys.firstOrNull { matchStationNames(targetStation, it) }
                                 if (key != null) {
                                     val (telDepTime, isStop) = stMap[key]!!
                                     if (!isStop) {
@@ -719,11 +760,10 @@ fun analyzeStationChanges(
     return Pair(toMsk, fromMsk)
 }
 
-// Экспорт двух файлов строго по стандарту образцов Word
+// Экспорт двух файлов строго по стандарту
 fun exportDatedReports(station: String, toMoscow: List<DatedTrainRecord>, fromMoscow: List<DatedTrainRecord>) {
     val desktop = File(System.getProperty("user.home"), "Desktop")
 
-    // Файл НА МОСКВУ
     val fToMsk = File(desktop, "$station на Москву.txt")
     fToMsk.printWriter(Charsets.UTF_8).use { out ->
         out.println("$station Изменения в графике движения эл/поездов")
@@ -738,7 +778,6 @@ fun exportDatedReports(station: String, toMoscow: List<DatedTrainRecord>, fromMo
         }
     }
 
-    // Файл ОТ МОСКВЫ
     val fFromMsk = File(desktop, "$station от Москвы.txt")
     fFromMsk.printWriter(Charsets.UTF_8).use { out ->
         out.println("$station Изменения в графике движения эл/поездов")
