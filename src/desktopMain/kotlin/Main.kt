@@ -129,7 +129,6 @@ fun cleanTime(raw: String): String {
     return clean
 }
 
-// Преобразование дат в читаемый заголовок
 fun humanizeDateString(raw: String, defaultHeader: String): String {
     val clean = raw.replace("(", "").replace(")", "").trim()
     val monthsMap = mapOf(
@@ -173,7 +172,6 @@ fun humanizeDateString(raw: String, defaultHeader: String): String {
     return if (clean.isNotEmpty()) clean else defaultHeader
 }
 
-// Извлечение первого числа даты для хронологической сортировки
 fun extractFirstDateNumber(dateHeader: String): Int {
     val m = Regex("\\d+").find(dateHeader)
     return m?.value?.toIntOrNull() ?: 999
@@ -307,7 +305,6 @@ fun extractDefaultTelegramPeriod(telText: String): String {
     return "с 3 по 8 октября"
 }
 
-// Полный анализ расписания со строгим разделением листов и хронологической сортировкой
 fun analyzeScheduleWithSmartDates(
     afisha: File,
     telegrams: List<File>,
@@ -347,7 +344,6 @@ fun analyzeScheduleWithSmartDates(
                 val sheet = wb.getSheetAt(sheetIndex)
                 val sheetName = sheet.sheetName.lowercase().trim()
 
-                // Строгое определение направления
                 val isFromMoscow = sheetName.startsWith("москва")
                 val isToMoscow = !isFromMoscow && (sheetName.endsWith("москва") || sheetName.contains("на москву") || sheetName.contains("москва"))
 
@@ -475,7 +471,6 @@ fun analyzeScheduleWithSmartDates(
         }
     } catch (_: Exception) {}
 
-    // Устранение дубликатов и сортировка: по дням месяца, затем по времени отправления
     val sortedToMsk = toMsk.distinctBy { "${it.dateGroup}_${it.trainNum}_${it.afishaTime}" }
         .sortedWith(compareBy({ extractFirstDateNumber(it.dateGroup) }, { it.afishaTime }))
 
@@ -485,38 +480,46 @@ fun analyzeScheduleWithSmartDates(
     return Pair(sortedToMsk, sortedFromMsk)
 }
 
-// Экспорт двух файлов строго в хронологическом порядке
+// Экспорт по папкам "На Москву" и "От Москвы" на Рабочем столе
 fun exportDatedReports(station: String, toMoscow: List<DatedTrainRecord>, fromMoscow: List<DatedTrainRecord>) {
     val desktop = File(System.getProperty("user.home"), "Desktop")
+    
+    // Создаем папки "На Москву" и "От Москвы" на Рабочем столе
+    val dirToMsk = File(desktop, "На Москву").apply { if (!exists()) mkdirs() }
+    val dirFromMsk = File(desktop, "От Москвы").apply { if (!exists()) mkdirs() }
 
-    val fToMsk = File(desktop, "$station на Москву.txt")
-    fToMsk.printWriter(Charsets.UTF_8).use { out ->
-        out.println("$station Изменения в графике движения эл/поездов")
-        out.println("на Москву")
+    if (toMoscow.isNotEmpty()) {
+        val fToMsk = File(dirToMsk, "$station на Москву.txt")
+        fToMsk.printWriter(Charsets.UTF_8).use { out ->
+            out.println("$station Изменения в графике движения эл/поездов")
+            out.println("на Москву")
 
-        val grouped = toMoscow.groupBy { it.dateGroup }
-        val sortedKeys = grouped.keys.sortedBy { extractFirstDateNumber(it) }
+            val grouped = toMoscow.groupBy { it.dateGroup }
+            val sortedKeys = grouped.keys.sortedBy { extractFirstDateNumber(it) }
 
-        sortedKeys.forEach { dateGroup ->
-            out.println(dateGroup)
-            grouped[dateGroup]?.forEach { r ->
-                out.println("        №${r.trainNum} ${r.destination} отправлением в ${r.afishaTime} - ${r.changeText}")
+            sortedKeys.forEach { dateGroup ->
+                out.println(dateGroup)
+                grouped[dateGroup]?.forEach { r ->
+                    out.println("        №${r.trainNum} ${r.destination} отправлением в ${r.afishaTime} - ${r.changeText}")
+                }
             }
         }
     }
 
-    val fFromMsk = File(desktop, "$station от Москвы.txt")
-    fFromMsk.printWriter(Charsets.UTF_8).use { out ->
-        out.println("$station Изменения в графике движения эл/поездов")
-        out.println("от Ленинградского вокзала, Ипподрома")
+    if (fromMoscow.isNotEmpty()) {
+        val fFromMsk = File(dirFromMsk, "$station от Москвы.txt")
+        fFromMsk.printWriter(Charsets.UTF_8).use { out ->
+            out.println("$station Изменения в графике движения эл/поездов")
+            out.println("от Ленинградского вокзала, Ипподрома")
 
-        val grouped = fromMoscow.groupBy { it.dateGroup }
-        val sortedKeys = grouped.keys.sortedBy { extractFirstDateNumber(it) }
+            val grouped = fromMoscow.groupBy { it.dateGroup }
+            val sortedKeys = grouped.keys.sortedBy { extractFirstDateNumber(it) }
 
-        sortedKeys.forEach { dateGroup ->
-            out.println(dateGroup)
-            grouped[dateGroup]?.forEach { r ->
-                out.println("        №${r.trainNum} отправлением в ${r.afishaTime} - ${r.changeText}")
+            sortedKeys.forEach { dateGroup ->
+                out.println(dateGroup)
+                grouped[dateGroup]?.forEach { r ->
+                    out.println("        №${r.trainNum} отправлением в ${r.afishaTime} - ${r.changeText}")
+                }
             }
         }
     }
@@ -540,7 +543,7 @@ fun App() {
     var isProcessing by remember { mutableStateOf(false) }
     var statusMessage by remember {
         mutableStateOf(
-            if (afishaFile != null) "Базовая афиша активна. Нажмите «Сверить», чтобы увидеть отмены и сдвиги графика строго по хронологии дат."
+            if (afishaFile != null) "Базовая афиша активна. Нажмите «Сверить», чтобы увидеть отмены и сдвиги графика в папках на Рабочем столе."
             else "Загрузите файл базовой афиши расписания (.xlsx)."
         )
     }
@@ -577,7 +580,7 @@ fun App() {
                             Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AppTheme.CorporateBlue, modifier = Modifier.size(28.dp))
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
-                                Text("SCHEDULE VERIFIER PRO — ХРОНОЛОГИЧЕСКИЙ РЕВИЗОР РАСПИСАНИЙ", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = AppTheme.HeaderNavy)
+                                Text("SCHEDULE VERIFIER PRO — ОРГАНИЗОВАННЫЙ РЕВИЗОР", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = AppTheme.HeaderNavy)
                                 Text(statusMessage, fontSize = 12.sp, color = AppTheme.TextMuted)
                             }
                         }
@@ -667,7 +670,7 @@ fun App() {
                             Text("Станции полигона:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = AppTheme.HeaderNavy)
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            // Кнопка ВЫБРАТЬ ВСЕ / СНЯТЬ ВСЕ
+                            // Кнопка ВЫБРАТЬ ВСЕ СТАНЦИИ СРАЗУ
                             FilledTonalButton(
                                 onClick = {
                                     selectedStations = if (selectedStations.size == ALL_STATIONS.size) setOf("Сходня") else ALL_STATIONS.toSet()
@@ -717,7 +720,7 @@ fun App() {
                                     if (afishaFile == null) return@Button
                                     coroutineScope.launch {
                                         isProcessing = true
-                                        statusMessage = "Генерация отчетов по ${selectedStations.size} станциям на Рабочий стол..."
+                                        statusMessage = "Генерация отчетов по папкам 'На Москву' и 'От Москвы'..."
                                         withContext(Dispatchers.IO) {
                                             selectedStations.forEach { st ->
                                                 val (toMsk, fromMsk) = analyzeScheduleWithSmartDates(afishaFile!!, telegramFiles, vygruzkiFiles, st)
@@ -725,7 +728,7 @@ fun App() {
                                             }
                                         }
                                         isProcessing = false
-                                        statusMessage = "УСПЕШНО! Созданы файлы отмен по ${selectedStations.size} станциям на Рабочем столе!"
+                                        statusMessage = "УСПЕШНО! Файлы отмен разложены по папкам 'На Москву' и 'От Москвы' на Рабочем столе!"
                                     }
                                 },
                                 enabled = !isProcessing && afishaFile != null && selectedStations.isNotEmpty(),
@@ -734,7 +737,7 @@ fun App() {
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Создать файлы ОТМЕНА (${selectedStations.size} ст.)")
+                                Text("Создать файлы ОТМЕНА в папки (${selectedStations.size} ст.)")
                             }
                         }
 
@@ -762,7 +765,7 @@ fun App() {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // ТАБЫ И ПОЛЕ ПОИСКА (БЕЗ ОБРЕЗАНИЯ ШРИФТА)
+                // ТАБЫ И ПОИСК
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     TabRow(
                         selectedTabIndex = activeTab,
@@ -937,7 +940,7 @@ fun DocUploadCard(title: String, desc: String, isLoaded: Boolean, color: Color, 
 fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
-        title = "ScheduleVerifier PRO — Хронологический ревизор расписаний"
+        title = "ScheduleVerifier PRO — Организованный ревизор расписаний"
     ) {
         App()
     }
