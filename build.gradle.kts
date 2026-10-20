@@ -12,6 +12,16 @@ kotlin {
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation(compose.material3)
+                
+                // Чтение Excel (.xlsx) и Word (.docx)
+                implementation("org.apache.poi:poi-ooxml:5.2.5")
+                
+                // Чтение PDF (.pdf)
+                implementation("org.apache.pdfbox:pdfbox:3.0.2")
+                
+                // Корутины для плавной работы интерфейса
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.8.1")
             }
         }
     }
@@ -30,7 +40,7 @@ compose.desktop {
             windows {
                 menuGroup = "ScheduleVerifier"
                 upgradeUuid = "a4e8d320-1123-4c92-b432-8495a820bb11"
-                console = true
+                console = false
             }
         }
     }
