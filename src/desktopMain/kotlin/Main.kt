@@ -40,6 +40,7 @@ data class MasterTrainRecord(
     val trainNum: String,
     val daysInfo: String,
     val station: String,
+    val destination: String, // Восстановлено для компиляции
     val route: String,
     val afishaTime: String,
     val telegramTime: String,
