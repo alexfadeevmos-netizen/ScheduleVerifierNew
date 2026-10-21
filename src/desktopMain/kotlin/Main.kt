@@ -78,7 +78,7 @@ data class SingleDateFilterOption(
     val day: Int,
     val monthNum: Int,
     val monthName: String,
-    val displayLabel: String // например: "15 октября"
+    val displayLabel: String
 )
 
 data class TelegramTrainEvent(
@@ -320,7 +320,6 @@ fun cleanSingleTimeToken(raw: String): String {
     return ""
 }
 
-// Расчет разницы в минутах между временем Афиши и временем Телеграммы (для наглядности в Отчете)
 fun calculateMinutesDiffLabel(afishaTime: String, telegramTime: String): String {
     val p1 = afishaTime.split(":")
     val p2 = telegramTime.split(":")
@@ -343,7 +342,7 @@ fun getDirectionByTrainNumber(trainNum: String): Direction {
     return if (lastDigit % 2 == 0) Direction.FROM_MOSCOW else Direction.TO_MOSCOW
 }
 
-// ==================== КАЛЕНДАРНЫЙ РАЗБОР ДАТ И ФИЛЬТР ПО ЧИСЛАМ ====================
+// ==================== КАЛЕНДАРНЫЙ РАЗБОР ДАТ (С МЕНЬШЕГО К БОЛЬШЕМУ) ====================
 
 val MONTH_NAMES_BY_NUM = mapOf(
     1 to "января", 2 to "февраля", 3 to "марта", 4 to "апреля", 5 to "мая", 6 to "июня",
@@ -433,7 +432,6 @@ fun formatDaysBlockHeader(days: List<Int>, monthName: String): String {
     }
 }
 
-// Собирает все доступные числа месяца из загруженных телеграмм для панели фильтра дат
 fun extractAvailableDateOptions(events: List<TelegramTrainEvent>): List<SingleDateFilterOption> {
     val map = mutableMapOf<Pair<Int, Int>, SingleDateFilterOption>()
     for (ev in events) {
@@ -929,7 +927,7 @@ fun parseOtmenyFiles(files: List<File>): Map<String, String> {
     return map
 }
 
-// ==================== ЯДРО СРАВНЕНИЯ И ХРОНОЛОГИЧЕСКОЙ РАЗВЕРТКИ ДАТ ====================
+// ==================== ЯДРО СРАВНЕНИЯ И СХОДНЫЕ СКЛЕЙКИ ДАТ ====================
 
 fun buildRemainingStopsNote(
     targetKey: String,
@@ -958,14 +956,13 @@ fun buildRemainingStopsNote(
     return ""
 }
 
-// Применяет фильтр по выбранному числу (если задан) или группирует все даты телеграммы в строгом хронологическом порядке
+// УЛУЧШЕННЫЙ АЛГОРИТМ: Склейка смежных календарных дней (например 1-3 и 4-6) в единый блок "с 1 по 6 ноября", если набор изменений идентичен!
 fun expandAndGroupChronologically(
     rawItems: List<Pair<CalendarDaySet, StationComparisonRow>>,
     selectedDateFilter: SingleDateFilterOption? = null
 ): List<StationComparisonRow> {
     if (rawItems.isEmpty()) return emptyList()
 
-    // Если пользователь выбрал конкретное число (например, "15 октября") — оставляем только те поезда, которые действуют в это число!
     if (selectedDateFilter != null) {
         val filtered = rawItems.filter { (cal, _) ->
             cal.days.isEmpty() || (selectedDateFilter.day in cal.days && cal.monthNum == selectedDateFilter.monthNum)
@@ -1961,7 +1958,6 @@ fun StationAnalyticsReportView(
     fromMoscow: List<StationComparisonRow>,
     onTrainClick: (StationComparisonRow) -> Unit
 ) {
-    // 0 = Все категории, 1 = Отменено, 2 = Назначено, 3 = Изменено время, 4 = Расхождения
     var selectedCategory by remember { mutableStateOf(0) }
 
     val all = (toMoscow + fromMoscow).distinctBy { "${it.trainNum}_${it.direction}_${it.dateGroup}" }
@@ -1978,7 +1974,7 @@ fun StationAnalyticsReportView(
         ) {
             Column {
                 Text("Сводная отчетность по станции: $stationName", fontSize = 18.sp, fontWeight = FontWeight.Black, color = TrainRTheme.NavyDark)
-                Text("Период выборки: $dateFilterLabel • Нажмите на любую карточку ниже для фильтрации списка", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TrainRTheme.RoyalBlue)
+                Text("Период выборки: $dateFilterLabel • Нажмите на карточку для фильтрации списка поездов", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TrainRTheme.RoyalBlue)
             }
             if (selectedCategory != 0) {
                 FilledTonalButton(
@@ -1993,7 +1989,7 @@ fun StationAnalyticsReportView(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Интерактивные карточки-переключатели
+        // Интерактивные кликабельные карточки отчётности
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             StatSummaryBox(
                 label = "Отменено поездов",
@@ -2031,7 +2027,6 @@ fun StationAnalyticsReportView(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Краткая текстовая выжимка по всем 3 ключевым группам (Отменено / Назначено / Изменено время Афиша -> Телеграмма)
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp),
@@ -2061,7 +2056,6 @@ fun StationAnalyticsReportView(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Табличная расшифровка с колонками: № поезда | Маршрут | Афиша -> Телеграмма (разница) | Детали изменений
         Row(
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFFE2E8F0)).padding(vertical = 6.dp, horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -2075,72 +2069,28 @@ fun StationAnalyticsReportView(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            if (selectedCategory == 0 || selectedCategory == 3) {
-                if (shifted.isNotEmpty()) {
-                    item {
-                        Text(
-                            "Изменено время отправления / остановки (${shifted.size}):",
-                            fontWeight = FontWeight.Black,
-                            fontSize = 13.sp,
-                            color = TrainRTheme.AmberWarn,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
-                        )
-                    }
-                    items(shifted) { r ->
-                        DetailedReportTrainCard(r, TrainRTheme.GoldAccent) { onTrainClick(r) }
-                    }
-                }
-            }
+        val displayList = when (selectedCategory) {
+            1 -> cancelled
+            2 -> appointed
+            3 -> shifted
+            4 -> discrepancies
+            else -> cancelled + appointed + shifted + discrepancies
+        }
 
-            if (selectedCategory == 0 || selectedCategory == 1) {
-                if (cancelled.isNotEmpty()) {
-                    item {
-                        Text(
-                            "Отмененные поезда и остановки (${cancelled.size}):",
-                            fontWeight = FontWeight.Black,
-                            fontSize = 13.sp,
-                            color = TrainRTheme.RedCancel,
-                            modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
-                        )
-                    }
-                    items(cancelled) { r ->
-                        DetailedReportTrainCard(r, TrainRTheme.RedCancel) { onTrainClick(r) }
-                    }
-                }
+        if (displayList.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Нет поездов в выбранной категории отчётности.", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TrainRTheme.TextSub)
             }
-
-            if (selectedCategory == 0 || selectedCategory == 2) {
-                if (appointed.isNotEmpty()) {
-                    item {
-                        Text(
-                            "Назначенные поезда и остановки (${appointed.size}):",
-                            fontWeight = FontWeight.Black,
-                            fontSize = 13.sp,
-                            color = TrainRTheme.GreenSuccess,
-                            modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
-                        )
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                items(displayList) { r ->
+                    val accentColor = when {
+                        r.isCancelledAtStation -> TrainRTheme.RedCancel
+                        r.isAppointedAtStation -> TrainRTheme.GreenSuccess
+                        r.hasDiscrepancyWithOtmeny -> TrainRTheme.NavyDark
+                        else -> TrainRTheme.GoldAccent
                     }
-                    items(appointed) { r ->
-                        DetailedReportTrainCard(r, TrainRTheme.GreenSuccess) { onTrainClick(r) }
-                    }
-                }
-            }
-
-            if (selectedCategory == 0 || selectedCategory == 4) {
-                if (discrepancies.isNotEmpty()) {
-                    item {
-                        Text(
-                            "Расхождения между Телеграммой и файлом «Отмены» (${discrepancies.size}):",
-                            fontWeight = FontWeight.Black,
-                            fontSize = 13.sp,
-                            color = TrainRTheme.NavyDark,
-                            modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
-                        )
-                    }
-                    items(discrepancies) { r ->
-                        DetailedReportTrainCard(r, TrainRTheme.NavyDark) { onTrainClick(r) }
-                    }
+                    DetailedReportTrainCard(r, accentColor) { onTrainClick(r) }
                 }
             }
         }
@@ -2207,7 +2157,6 @@ fun DetailedReportTrainCard(r: StationComparisonRow, accent: Color, onClick: () 
             Text(r.destinationLabel, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = TrainRTheme.TextSub)
         }
 
-        // Наглядный блок "Время Афиша ➔ Время Телеграмма (+X мин)"
         Surface(
             shape = RoundedCornerShape(5.dp),
             color = accent.copy(alpha = 0.12f),
