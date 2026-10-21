@@ -768,8 +768,8 @@ fun buildStationComparison(targetStationDisplay: String, afishaDb: Map<String, A
 
 fun exportStationFilesToFolders(station: String, toMoscow: List<StationComparisonRow>, fromMoscow: List<StationComparisonRow>, dateFilterSuffix: String = "") {
     val desktop = File(System.getProperty("user.home"), "Desktop")
-    val dirToMoscow = File(desktop, "До Москвы и Ипподрома (нечетные)").apply { if (!exists()) mkdirs() }
-    val dirFromMoscow = File(desktop, "От Москвы и Ипподрома (четные)").apply { if (!exists()) mkdirs() }
+    val dirToMoscow = File(desktop, "На Москву и Ипподром (нечетные)").apply { if (!exists()) mkdirs() }
+    val dirFromMoscow = File(desktop, "На область (из Ипподрома) (четные)").apply { if (!exists()) mkdirs() }
     val fileDatePart = if (dateFilterSuffix.isNotEmpty()) " ($dateFilterSuffix)" else ""
     
     if (toMoscow.isNotEmpty()) {
@@ -933,7 +933,7 @@ fun TrainRApp() {
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         androidx.compose.foundation.layout.FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            POLYGON_STATIONS.forEach { st -> StationChipItem(st, st in selectedStationsForExport, currentStation == st, Modifier.width(120.dp), { selectedStationsForExport = if (st in selectedStationsForExport) selectedStationsForExport - st else selectedStationsForExport + st }, { currentStation = st; recalculateStation(st, selectedDates) }) }
+                            POLYGON_STATIONS.forEach { st -> StationChipItem(st, st in selectedStationsForExport, currentStation == st, Modifier.width(120.dp), { selectedStationsForExport = if (st in selectedStationsForExport) selectedStationsForExport - st else selectedStationsForExport + st }, { currentStation = if (currentStation == st) "" else st; recalculateStation(if (currentStation == st) "" else st, selectedDates) }) }
                         }
                         if (availableDates.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(6.dp)); Divider(color = Color(0xFFE2E8F0)); Spacer(modifier = Modifier.height(6.dp))
@@ -947,8 +947,8 @@ fun TrainRApp() {
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     TabRow(selectedTabIndex = activeTab, containerColor = TrainRTheme.CardBg, contentColor = TrainRTheme.RoyalBlue, modifier = Modifier.width(620.dp).height(36.dp).clip(RoundedCornerShape(8.dp))) {
-                        Tab(selected = activeTab == 0, onClick = { activeTab = 0 }, text = { Text("ДО МОСКВЫ / ИППОДРОМА (${toMoscowList.size})", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, maxLines = 1) })
-                        Tab(selected = activeTab == 1, onClick = { activeTab = 1 }, text = { Text("ОТ МОСКВЫ / ИППОДРОМА (${fromMoscowList.size})", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, maxLines = 1) })
+                        Tab(selected = activeTab == 0, onClick = { activeTab = 0 }, text = { Text("НА МОСКВУ / ИППОДРОМ (${toMoscowList.size})", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, maxLines = 1) })
+                        Tab(selected = activeTab == 1, onClick = { activeTab = 1 }, text = { Text("НА ОБЛАСТЬ / ИППОДРОМ (${fromMoscowList.size})", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, maxLines = 1) })
                         Tab(selected = activeTab == 2, onClick = { activeTab = 2 }, text = { Text("ОТЧЕТ", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.GreenSuccess, maxLines = 1) })
                         Tab(selected = activeTab == 3, onClick = { activeTab = 3 }, text = { Text("ПОИСК (${globalSearchResults.size})", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.GoldAccent, maxLines = 1) })
                         Tab(selected = activeTab == 4, onClick = { activeTab = 4 }, text = { Text("ОШИБКИ (${globalErrors.count { !it.isIgnored }})", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.RedCancel, maxLines = 1) })
@@ -1181,7 +1181,12 @@ fun StationAnalyticsReportView(stationName: String, dateFilterLabel: String, toM
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(activeCategoryTitle, fontWeight = FontWeight.Black, fontSize = 12.sp, color = TrainRTheme.NavyDark)
-                OutlinedTextField(value = searchInReport, onValueChange = { searchInReport = it }, placeholder = { Text("Поиск...", fontSize = 10.sp) }, modifier = Modifier.width(150.dp).height(28.dp), singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 11.sp), shape = RoundedCornerShape(6.dp), trailingIcon = { if (searchInReport.isNotEmpty()) IconButton(onClick = { searchInReport = "" }, modifier = Modifier.size(18.dp)) { Icon(Icons.Default.Clear, "Сброс", modifier = Modifier.size(12.dp)) } })
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    OutlinedTextField(value = searchInReport, onValueChange = { searchInReport = it }, placeholder = { Text("Поиск...", fontSize = 10.sp) }, modifier = Modifier.width(150.dp).height(28.dp), singleLine = true, textStyle = LocalTextStyle.current.copy(fontSize = 11.sp), shape = RoundedCornerShape(6.dp), trailingIcon = { if (searchInReport.isNotEmpty()) IconButton(onClick = { searchInReport = "" }, modifier = Modifier.size(18.dp)) { Icon(Icons.Default.Clear, "Сброс", modifier = Modifier.size(12.dp)) } })
+                    Button(onClick = { /* Just triggers recomposition */ }, colors = ButtonDefaults.buttonColors(containerColor = TrainRTheme.RoyalBlue), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp), modifier = Modifier.height(28.dp), shape = RoundedCornerShape(6.dp)) {
+                        Text("Найти", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
         item { Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFFE2E8F0)).padding(vertical = 4.dp, horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text("ДАТА", fontWeight = FontWeight.Black, fontSize = 10.sp, modifier = Modifier.width(110.dp)); Text("№ ПОЕЗДА", fontWeight = FontWeight.Black, fontSize = 10.sp, modifier = Modifier.width(85.dp)); Text("МАРШРУТ", fontWeight = FontWeight.Black, fontSize = 10.sp, modifier = Modifier.width(155.dp)); Text("АФИША ➔ ТЕЛЕГРАММА", fontWeight = FontWeight.Black, fontSize = 10.sp, modifier = Modifier.width(175.dp)); Text("СТАТУС", fontWeight = FontWeight.Black, fontSize = 10.sp, modifier = Modifier.weight(1f)) } }
@@ -1285,7 +1290,7 @@ fun CompactFileBadge(title: String, subtitle: String, isLoaded: Boolean, accent:
         Row(modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(imageVector = if (isLoaded) Icons.Default.CheckCircle else Icons.Default.Add, contentDescription = null, tint = if (isLoaded) accent else TrainRTheme.TextSub, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(4.dp))
-            Column(modifier = Modifier.weight(1f)) { Text(title, fontSize = 10.sp, fontWeight = FontWeight.Black, color = TrainRTheme.NavyDark, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(subtitle, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = TrainRTheme.TextSub, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Center) { Text(title, fontSize = 10.sp, fontWeight = FontWeight.Black, color = TrainRTheme.NavyDark, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(subtitle, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = TrainRTheme.TextSub, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             if (isLoaded) IconButton(onClick = onClear, modifier = Modifier.size(22.dp)) { Icon(Icons.Default.Clear, "Удалить", tint = TrainRTheme.RedCancel, modifier = Modifier.size(14.dp)) }
         }
     }
