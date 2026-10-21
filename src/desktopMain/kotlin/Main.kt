@@ -914,7 +914,7 @@ fun TrainRApp() {
                         if (availableDates.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(6.dp)); Divider(color = Color(0xFFE2E8F0)); Spacer(modifier = Modifier.height(5.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.DateRange, null, tint = TrainRTheme.RoyalBlue, modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(5.dp)); Text("Фильтр по дате:", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.NavyDark)
-                                Button(onClick = { showCalendarDialog = true }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp), modifier = Modifier.height(26.dp).padding(start = 10.dp), shape = RoundedCornerShape(6.dp)) { Icon(Icons.Default.EditCalendar, null, modifier = Modifier.size(14.dp)); Spacer(modifier = Modifier.width(4.dp)); Text(if (selectedDates.isEmpty()) "Все дни" else "Выбрано: ${selectedDates.size}", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                                Button(onClick = { showCalendarDialog = true }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp), modifier = Modifier.height(26.dp).padding(start = 10.dp), shape = RoundedCornerShape(6.dp)) { Icon(Icons.Default.DateRange, null, modifier = Modifier.size(14.dp)); Spacer(modifier = Modifier.width(4.dp)); Text(if (selectedDates.isEmpty()) "Все дни" else "Выбрано: ${selectedDates.size}", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                                 if (selectedDates.isNotEmpty()) { Spacer(modifier = Modifier.width(8.dp)); Text(selectedDates.joinToString(", ") { it.displayLabel }, fontSize = 11.sp, color = TrainRTheme.TextSub, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                             }
                         }
@@ -1009,6 +1009,7 @@ fun GlobalErrorsView(errors: List<GlobalError>) {
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun CalendarDatePickerDialog(
     availableDates: List<SingleDateFilterOption>,
