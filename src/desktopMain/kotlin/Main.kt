@@ -132,7 +132,6 @@ val STATION_ORDER_INDEX = mapOf(
     "рижская" to 40, "пострижский" to 41, "москва" to 42, "ипподром" to 43
 )
 
-// Закрытые станции для пассажиров. На них не должно быть выгрузки.
 val HARD_CLOSED_STATIONS = setOf("петровскоразумовская", "петрразумовская", "рижская", "пострижский", "малино")
 
 fun getCachedAfishaFile(): File {
@@ -677,7 +676,6 @@ fun buildStationComparison(targetStationDisplay: String, afishaDb: Map<String, A
     val targetKey = normalizeStationKey(targetStationDisplay); val targetOrder = STATION_ORDER_INDEX[targetKey] ?: AppConstants.DEFAULT_STATION_ORDER
     val toMoscowRaw = mutableListOf<Pair<CalendarDaySet, StationComparisonRow>>(); val fromMoscowRaw = mutableListOf<Pair<CalendarDaySet, StationComparisonRow>>(); val handledTrains = mutableSetOf<String>()
     
-    // Фильтрация закрытых станций
     if (targetKey in HARD_CLOSED_STATIONS) return Pair(emptyList(), emptyList())
     
     for (ev in telegramEvents) {
@@ -686,7 +684,6 @@ fun buildStationComparison(targetStationDisplay: String, afishaDb: Map<String, A
             val afInfo = lookupAfisha(afishaDb, dirNum); val dir = afInfo?.direction ?: getDirectionBySingleNumber(dirNum)
             val isMcd = afInfo?.isMcd ?: ("/" in ev.trainNum || ev.routeFromTelegram.contains("Ипподром", true) || isTrainMcd(dirNum))
             
-            // Левобережная работает только на Москву. Если направление ОТ Москвы - игнорируем
             if (targetKey == "левобережная" && dir == Direction.FROM_MOSCOW) continue
             
             val afTimeAtStation = afInfo?.stationTimes?.get(targetKey) ?: ""; val telPairAtStation = ev.stationTimes[targetKey]
@@ -758,7 +755,6 @@ fun buildStationComparison(targetStationDisplay: String, afishaDb: Map<String, A
         for (dirNum in splitDirectionalTrainNumbers(num)) {
             val afInfo = lookupAfisha(afishaDb, dirNum); val afTime = afInfo?.stationTimes?.get(targetKey) ?: "-"; val dir = afInfo?.direction ?: getDirectionBySingleNumber(dirNum)
             
-            // Левобережная работает только на Москву. Если направление ОТ Москвы - игнорируем
             if (targetKey == "левобережная" && dir == Direction.FROM_MOSCOW) continue
             
             val isMcd = afInfo?.isMcd ?: isTrainMcd(dirNum); val emptyCal = CalendarDaySet(AppConstants.DEFAULT_MONTH_NUM, AppConstants.DEFAULT_MONTH_NAME, emptyList(), "По файлу «Отмены»")
@@ -933,7 +929,7 @@ fun TrainRApp() {
                             Text("Станция:", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.NavyDark)
                             FilledTonalButton(onClick = { selectedStationsForExport = if (selectedStationsForExport.size == POLYGON_STATIONS.size) emptySet() else POLYGON_STATIONS.toSet() }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp), modifier = Modifier.height(26.dp), shape = RoundedCornerShape(6.dp)) { Text(if (selectedStationsForExport.size == POLYGON_STATIONS.size) "Снять галочки" else "Выбрать все", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
                             Spacer(modifier = Modifier.weight(1f))
-                            Button(onClick = { recalculateStation("ВСЕ") }, enabled = !isBusy, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E)), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp), modifier = Modifier.height(28.dp), shape = RoundedCornerShape(6.dp)) { Icon(Icons.Default.Autorenew, null, modifier = Modifier.size(14.dp)); Spacer(modifier = Modifier.width(2.dp)); Text("Сверить ВСЁ", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
+                            Button(onClick = { recalculateStation("ВСЕ") }, enabled = !isBusy, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E)), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp), modifier = Modifier.height(28.dp), shape = RoundedCornerShape(6.dp)) { Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp)); Spacer(modifier = Modifier.width(2.dp)); Text("Сверить ВСЁ", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
                             Button(onClick = { if (currentStation.isNotEmpty()) recalculateStation(currentStation, selectedDates) }, enabled = !isBusy && currentStation.isNotEmpty(), colors = ButtonDefaults.buttonColors(containerColor = TrainRTheme.RoyalBlue), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp), modifier = Modifier.height(28.dp), shape = RoundedCornerShape(6.dp)) { Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp)); Spacer(modifier = Modifier.width(2.dp)); Text("Сверить: ${if (currentStation.isEmpty()) "Выберите ст." else currentStation}", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                             Button(onClick = { scope.launch { isBusy = true; statusText = "Генерация выгрузок..."; withContext(Dispatchers.IO) { val pTels = if (telegramEvents.isEmpty()) TelegramParseCache.get(telegramFiles).first else telegramEvents; val pOtm = if (otmenyMap.isEmpty()) OtmenyParseCache.get(otmenyFiles) else otmenyMap; selectedStationsForExport.forEach { st -> val (tM, fM) = buildStationComparison(st, afishaDb, pTels, pOtm, manualMap, selectedDates, ignoredErrors); exportStationFilesToFolders(st, tM, fM, selectedDates.joinToString(", ") { it.displayLabel }) } }; isBusy = false; statusText = "ГОТОВО! Выгрузки сохранены." } }, enabled = !isBusy && selectedStationsForExport.isNotEmpty(), colors = ButtonDefaults.buttonColors(containerColor = TrainRTheme.RedCancel), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp), modifier = Modifier.height(28.dp), shape = RoundedCornerShape(6.dp)) { Icon(Icons.Default.Share, null, modifier = Modifier.size(14.dp)); Spacer(modifier = Modifier.width(2.dp)); Text("Генерировать (${selectedStationsForExport.size})", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
                         }
