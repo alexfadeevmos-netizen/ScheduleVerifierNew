@@ -956,7 +956,6 @@ fun buildRemainingStopsNote(
     return ""
 }
 
-// УЛУЧШЕННЫЙ АЛГОРИТМ: Склейка смежных календарных дней (например 1-3 и 4-6) в единый блок "с 1 по 6 ноября", если набор изменений идентичен!
 fun expandAndGroupChronologically(
     rawItems: List<Pair<CalendarDaySet, StationComparisonRow>>,
     selectedDateFilter: SingleDateFilterOption? = null
@@ -1502,7 +1501,7 @@ fun TrainRApp() {
         Surface(modifier = Modifier.fillMaxSize(), color = TrainRTheme.BgMain) {
             Column(modifier = Modifier.fillMaxSize().padding(10.dp)) {
 
-                // 1. КОМПАКТНАЯ ШАПКА С ВИНТАЖНЫМ ЛОГОТИПОМ TRAIN-R И ФАЙЛАМИ
+                // 1. ШАПКА
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
@@ -1600,7 +1599,7 @@ fun TrainRApp() {
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // 2. ПАНЕЛЬ ВЫБОРА СТАНЦИИ, ФИЛЬТРА ПО ДАТАМ И ГЕНЕРАЦИИ ФАЙЛОВ В 2 ПАПКИ
+                // 2. ВЫБОР СТАНЦИИ И ДАТЫ
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
@@ -1697,7 +1696,6 @@ fun TrainRApp() {
                             }
                         }
 
-                        // ПОЛОСА ФИЛЬТРА ПО КОНКРЕТНОЙ ДАТЕ (ЧИСЛУ)
                         if (availableDates.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(6.dp))
                             Divider(color = Color(0xFFE2E8F0))
@@ -1736,7 +1734,7 @@ fun TrainRApp() {
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // 3. ПАНЕЛЬ ВКЛАДОК И ПОИСКА ПО НОМЕРУ ПОЕЗДА
+                // 3. ВКЛАДКИ И ПОИСК
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1779,7 +1777,7 @@ fun TrainRApp() {
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // 4. ГЛАВНАЯ ОБЛАСТЬ ТАБЛИЦЫ ПОЕЗДОВ И ОТЧЕТНОСТИ
+                // 4. ГЛАВНАЯ ОБЛАСТЬ
                 Card(
                     modifier = Modifier.fillMaxSize(),
                     shape = RoundedCornerShape(10.dp),
@@ -1958,6 +1956,7 @@ fun StationAnalyticsReportView(
     fromMoscow: List<StationComparisonRow>,
     onTrainClick: (StationComparisonRow) -> Unit
 ) {
+    // 0 = Все, 1 = Отменено, 2 = Назначено, 3 = Изменено время, 4 = Расхождения
     var selectedCategory by remember { mutableStateOf(0) }
 
     val all = (toMoscow + fromMoscow).distinctBy { "${it.trainNum}_${it.direction}_${it.dateGroup}" }
@@ -1966,7 +1965,10 @@ fun StationAnalyticsReportView(
     val shifted = all.filter { !it.isCancelledAtStation && !it.isAppointedAtStation && (it.isTimeShiftedAtStation || it.finalChangeText.contains("отправится", true) || it.skippedStopsSummary.isNotEmpty() || it.appointedStopsSummary.isNotEmpty()) }
     val discrepancies = all.filter { it.hasDiscrepancyWithOtmeny }
 
-    Column(modifier = Modifier.fillMaxSize().padding(14.dp)) {
+    // Главный вертикальный скролл для всей вкладки отчетов, чтобы ничто не обрезалось и всё прокручивалось!
+    val reportScrollState = rememberScrollState()
+
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(reportScrollState).padding(16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1974,7 +1976,7 @@ fun StationAnalyticsReportView(
         ) {
             Column {
                 Text("Сводная отчетность по станции: $stationName", fontSize = 18.sp, fontWeight = FontWeight.Black, color = TrainRTheme.NavyDark)
-                Text("Период выборки: $dateFilterLabel • Нажмите на карточку для фильтрации списка поездов", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TrainRTheme.RoyalBlue)
+                Text("Период выборки: $dateFilterLabel • Нажмите на карточку для детализации списка внизу", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TrainRTheme.RoyalBlue)
             }
             if (selectedCategory != 0) {
                 FilledTonalButton(
@@ -1982,14 +1984,14 @@ fun StationAnalyticsReportView(
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                     modifier = Modifier.height(30.dp)
                 ) {
-                    Text("Показать все категории (${all.size})", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Сбросить фильтр (показать все)", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Интерактивные кликабельные карточки отчётности
+        // 4 Интерактивные карточки-фильтры
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             StatSummaryBox(
                 label = "Отменено поездов",
@@ -2027,6 +2029,7 @@ fun StationAnalyticsReportView(
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        // Краткая текстовая выжимка
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp),
@@ -2054,7 +2057,18 @@ fun StationAnalyticsReportView(
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(12.dp))
+
+        val activeCategoryTitle = when (selectedCategory) {
+            1 -> "Детализация: Отмененные поезда (${cancelled.size})"
+            2 -> "Детализация: Назначенные поезда (${appointed.size})"
+            3 -> "Детализация: Измененные поезда (${shifted.size})"
+            4 -> "Детализация: Расхождения с выгрузкой (${discrepancies.size})"
+            else -> "Полная детализация по всем изменениям (${all.size})"
+        }
+
+        Text(activeCategoryTitle, fontWeight = FontWeight.Black, fontSize = 14.sp, color = TrainRTheme.NavyDark)
+        Spacer(modifier = Modifier.height(4.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFFE2E8F0)).padding(vertical = 6.dp, horizontal = 10.dp),
@@ -2078,12 +2092,13 @@ fun StationAnalyticsReportView(
         }
 
         if (displayList.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
                 Text("Нет поездов в выбранной категории отчётности.", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TrainRTheme.TextSub)
             }
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                items(displayList) { r ->
+            // Выводим все элементы списка с вертикальной прокруткой всей вкладки
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                displayList.forEach { r ->
                     val accentColor = when {
                         r.isCancelledAtStation -> TrainRTheme.RedCancel
                         r.isAppointedAtStation -> TrainRTheme.GreenSuccess
@@ -2109,8 +2124,8 @@ fun StatSummaryBox(
     Surface(
         modifier = modifier.clickable { onClick() },
         shape = RoundedCornerShape(8.dp),
-        color = if (isSelected) color.copy(alpha = 0.20f) else color.copy(alpha = 0.08f),
-        border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) color else color.copy(alpha = 0.35f))
+        color = if (isSelected) color.copy(alpha = 0.25f) else color.copy(alpha = 0.08f),
+        border = androidx.compose.foundation.BorderStroke(if (isSelected) 2.5.dp else 1.dp, if (isSelected) color else color.copy(alpha = 0.35f))
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -2119,7 +2134,7 @@ fun StatSummaryBox(
         ) {
             Column {
                 Text(label, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = TrainRTheme.NavyDark)
-                Text(if (isSelected) "Фильтр активен (нажмите для сброса)" else "Нажмите для просмотра списка", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = color)
+                Text(if (isSelected) "Фильтр активен (нажмите сброс)" else "Нажмите для фильтра", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = color)
             }
             Text(count.toString(), fontSize = 22.sp, fontWeight = FontWeight.Black, color = color)
         }
