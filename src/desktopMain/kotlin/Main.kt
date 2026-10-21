@@ -5,7 +5,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -64,10 +66,17 @@ data class TrackSegmentRule(
     val trackNumber: String
 )
 
+data class CalendarDaySet(
+    val monthNum: Int,
+    val monthName: String,
+    val days: List<Int>,
+    val fallbackLabel: String
+)
+
 data class TelegramTrainEvent(
     val trainNum: String,
     val rawDates: String,
-    val formattedDateGroup: String,
+    val calendarDays: CalendarDaySet,
     val telegramHeader: String,
     val routeFromTelegram: String,
     val isCancelledFull: Boolean,
@@ -83,6 +92,7 @@ data class TelegramTrainEvent(
 
 data class StationComparisonRow(
     val dateGroup: String,
+    val sortDayKey: Int,
     val trainNum: String,
     val daysFlag: String,
     val routeString: String,
@@ -155,21 +165,16 @@ fun getCachedAfishaFile(): File {
 
 // ==================== ПРЕДОБРАБОТКА СЛИПШЕГОСЯ ТЕКСТА И СИНОНИМЫ СТАНЦИЙ ====================
 
-// Разделяет слипшиеся конструкции вида "7001крюково", "нр.7207/7208Ипподром", "Сходня12:40"
 fun preprocessTelegramLine(rawLine: String): String {
     var s = rawLine
-    // 1. Отделяем "нр." или "№" от цифр: "нр.7001" -> "нр. 7001"
     s = s.replace(Regex("(?i)(нр\\.?|поезд|№)(?=\\d)"), "$1 ")
-    // 2. Отделяем 4-значный (или сдвоенный) номер поезда от слипшихся букв станции: "7001крюково" -> "7001 крюково"
-    s = s.replace(Regex("(\\b\\d{4}(?:/\\d{4})?)(?=[А-Яа-яЁё])"), "$1 ")
-    // 3. Отделяем буквы станции от слипшегося времени: "Сходня12:40" -> "Сходня 12:40"
+    // Отделяем 4-значный номер поезда от слипшихся букв станции (но НЕ внутри времени типа 12:30:00)
+    s = s.replace(Regex("(?<![:.])(\\b\\d{4}(?:/\\d{4})?)(?=[А-Яа-яЁё])"), "$1 ")
     s = s.replace(Regex("([А-Яа-яЁё])(?=\\d{1,2}[:.]\\d{2})"), "$1 ")
-    // 4. Отделяем скобки от слов: "Москва(с 12/10)" -> "Москва (с 12/10)"
     s = s.replace(Regex("([А-Яа-яЁё0-9])\\("), "$1 (")
     return s.replace(Regex("\\s+"), " ").trim()
 }
 
-// Универсальный распознаватель любых сокращений и вариантов написания станций в Афише и Телеграммах
 fun normalizeStationKey(name: String): String {
     val lower = name.lowercase().replace("ё", "е")
         .replace(Regex("\\(закрыта\\)"), "")
@@ -177,7 +182,6 @@ fun normalizeStationKey(name: String): String {
         .replace(Regex("\\(ст\\.?\\s*ховрино\\)"), "")
         .trim()
 
-    // Особая проверка для "Оп Ховрино" / "пл. Ховрино" (это Грачёвская, а не ст. Ховрино!)
     if (Regex("\\b(оп|о\\.п\\.|пл|пл\\.)\\s*ховрин").containsMatchIn(lower)) {
         return "грачевская"
     }
@@ -189,87 +193,48 @@ fun normalizeStationKey(name: String): String {
     if (clean.isEmpty()) return ""
 
     return when {
-        // Зеленоград-Крюково = Крюково = Зеленоград = Зел.Крюково
         "крюков" in clean || "зеленогр" in clean || "зелкрюк" in clean -> "крюково"
-        // Петровско-Разумовская = П-Разумовская = Петр.Разумовская = П.Разум
         "петровско" in clean || "петрразум" in clean || "празумов" in clean || "петрраз" in clean -> "петровскоразумовская"
-        // Грачёвская
         "грачевск" in clean -> "грачевская"
-        // Ст. Ховрино
         "ховрин" in clean -> "ховрино"
-        // Новоподрезково и Подрезково (важен порядок проверки!)
         "новоподрез" in clean || "нподрез" in clean -> "новоподрезково"
         "подрезков" in clean -> "подрезково"
-        // Молжаниново
         "молжанин" in clean -> "молжаниново"
-        // Левобережная
         "левобереж" in clean || "лбережн" in clean -> "левобережная"
-        // Фирсановская
         "фирсанов" in clean -> "фирсановская"
-        // Малино
         "малин" in clean -> "малино"
-        // Сходня
         "сходн" in clean -> "сходня"
-        // Химки
         "химк" in clean -> "химки"
-        // Моссельмаш
         "моссельмаш" in clean || "моссельм" in clean -> "моссельмаш"
-        // Лихоборы
         "лихобор" in clean -> "лихоборы"
-        // Останкино
         "останкин" in clean -> "останкино"
-        // Пост Рижский и Рижская
         "постриж" in clean -> "пострижский"
         "рижск" in clean -> "рижская"
-        // Москва Товарная и Москва Пассажирская (Ленинградский вокзал)
         ("моск" in clean || "мск" in clean) && "тов" in clean -> "москватоварная"
         "моск" in clean || "мск" in clean || "ленингр" in clean || "лвок" in clean -> "москва"
-        // Ипподром (47 км)
         "ипподр" in clean || "47км" in clean || "раменск" in clean -> "ипподром"
-        // Алабушево
         "алабуш" in clean -> "алабушево"
-        // Радищево
         "радищ" in clean -> "радищево"
-        // Поваровка vs Поварово-1 (важен порядок!)
         "поваровк" in clean -> "поваровка"
         "поваров" in clean -> "поварово1"
-        // Березки-Дачные
         "березк" in clean -> "березкидачные"
-        // Подсолнечная
         "подсолн" in clean -> "подсолнечная"
-        // Сенеж
         "сенеж" in clean -> "сенеж"
-        // Головково
         "головк" in clean -> "головково"
-        // Покровка
         "покровк" in clean -> "покровка"
-        // Фроловское
         "фролов" in clean -> "фроловское"
-        // Стреглово / Стриглово
         "стрегл" in clean || "стригл" in clean -> "стреглово"
-        // Клин
         "клин" in clean -> "клин"
-        // Ямуга
         "ямуг" in clean -> "ямуга"
-        // Решетниково
         "решетник" in clean -> "решетниково"
-        // Завидово
         "завидов" in clean -> "завидово"
-        // Черничная
         "черничн" in clean -> "черничная"
-        // Московское Море
         "москморе" in clean || "московскоеморе" in clean -> "московскоеморе"
-        // Редкино
         "редкин" in clean -> "редкино"
-        // Межево
         "межев" in clean -> "межево"
-        // Кузьминка
         "кузьмин" in clean -> "кузьминка"
-        // Чуприяновка
         "чуприян" in clean -> "чуприяновка"
-        // Тверь
         "твер" in clean -> "тверь"
-        // Конаковский Мох, Донховка, Путепроводная, Конаково ГРЭС
         "конаков" in clean && "мох" in clean -> "конаковскиймох"
         "донхов" in clean -> "донховка"
         "путепров" in clean -> "путепроводная"
@@ -351,53 +316,101 @@ fun getDirectionByTrainNumber(trainNum: String): Direction {
     return if (lastDigit % 2 == 0) Direction.FROM_MOSCOW else Direction.TO_MOSCOW
 }
 
-fun formatTelegramDateGroup(raw: String, fallback: String): String {
-    val clean = raw.replace("(", "").replace(")", "").trim()
-    if (clean.isEmpty()) return fallback
+// ==================== КАЛЕНДАРНЫЙ РАЗБОР ДАТ (С МЕНЬШЕГО К БОЛЬШЕМУ) ====================
 
-    val months = mapOf(
-        "01" to "января", "02" to "февраля", "03" to "марта", "04" to "апреля", "05" to "мая", "06" to "июня",
-        "07" to "июля", "08" to "августа", "09" to "сентября", "10" to "октября", "11" to "ноября", "12" to "декабря",
-        "1" to "января", "2" to "февраля", "3" to "марта", "4" to "апреля", "5" to "мая", "6" to "июня",
-        "7" to "июля", "8" to "августа", "9" to "сентября"
-    )
+val MONTH_NAMES_BY_NUM = mapOf(
+    1 to "января", 2 to "февраля", 3 to "марта", 4 to "апреля", 5 to "мая", 6 to "июня",
+    7 to "июля", 8 to "августа", 9 to "сентября", 10 to "октября", 11 to "ноября", 12 to "декабря"
+)
 
-    val multiRanges = Regex("с\\s*(\\d{1,2})[/.\\-](\\d{1,2})\\s*по\\s*(\\d{1,2})[/.\\-](\\d{1,2})").findAll(clean).toList()
-    if (multiRanges.isNotEmpty()) {
-        val parts = multiRanges.map { m ->
-            val (d1, _, d2, m2) = m.destructured
-            val mName = months[m2] ?: "октября"
-            "с ${d1.toInt()} по ${d2.toInt()} $mName"
-        }
-        var res = parts.joinToString(", ")
-        val kr = Regex("кроме\\s*(\\d{1,2})[/.\\-](\\d{1,2})").find(clean) ?: Regex("кр\\.?\\s*(\\d{1,2})[/.\\-](\\d{1,2})").find(clean)
-        if (kr != null) {
-            val mName = months[kr.groupValues[2]] ?: "октября"
-            res += " (кроме ${kr.groupValues[1].toInt()} $mName)"
-        }
-        return res
-    }
-
-    val onlySingle = Regex("только\\s*(\\d{1,2})[/.\\-](\\d{1,2})").find(clean)
-    if (onlySingle != null) {
-        val mName = months[onlySingle.groupValues[2]] ?: "октября"
-        return "${onlySingle.groupValues[1].toInt()} $mName"
-    }
-
-    val listMatch = Regex("([\\d\\s,]+)[/.\\-](\\d{1,2})").find(clean)
-    if (listMatch != null) {
-        val days = listMatch.groupValues[1].split(",").mapNotNull { it.trim().toIntOrNull() }
-        if (days.isNotEmpty()) {
-            val mName = months[listMatch.groupValues[2]] ?: "октября"
-            return "${days.joinToString(", ")} $mName"
+fun detectMonthNumFromString(s: String, defaultMonth: Int = 10): Int {
+    val low = s.lowercase()
+    return when {
+        "янв" in low -> 1; "фев" in low -> 2; "мар" in low -> 3; "апр" in low -> 4
+        "мая" in low || "май" in low -> 5; "июн" in low -> 6; "июл" in low -> 7; "авг" in low -> 8
+        "сен" in low -> 9; "окт" in low -> 10; "ноя" in low -> 11; "дек" in low -> 12
+        else -> {
+            val slashM = Regex("\\d{1,2}[/.\\-](\\d{1,2})").find(low)?.groupValues?.get(1)?.toIntOrNull()
+            if (slashM != null && slashM in 1..12) slashM else defaultMonth
         }
     }
-
-    return clean
 }
 
-fun extractFirstDayForSort(dateGroup: String): Int {
-    return Regex("\\d+").find(dateGroup)?.value?.toIntOrNull() ?: 999
+// Превращает любую запись дат ("с 1 по 5 ноября", "1, 2/11", "с 12/10 по 15/10, кроме 14/10") в точный список календарных чисел!
+fun parseCalendarDays(raw: String, fallbackRaw: String): CalendarDaySet {
+    val source = if (raw.isNotBlank()) raw else fallbackRaw
+    val clean = source.replace("(", "").replace(")", "").trim()
+    val mNum = detectMonthNumFromString(clean, detectMonthNumFromString(fallbackRaw, 10))
+    val mName = MONTH_NAMES_BY_NUM[mNum] ?: "октября"
+
+    val daysSet = sortedSetOf<Int>()
+
+    // 1. Ищем диапазоны вида "с 12/10 по 15/10" или "с 1 по 5 ноября"
+    val rangeRegex = Regex("(?i)с\\s*(\\d{1,2})(?:[/.\\-]\\d{1,2})?(?:\\s*[а-я]+)?\\s*по\\s*(\\d{1,2})(?:[/.\\-]\\d{1,2})?")
+    for (rm in rangeRegex.findAll(clean)) {
+        val d1 = rm.groupValues[1].toIntOrNull() ?: continue
+        val d2 = rm.groupValues[2].toIntOrNull() ?: continue
+        if (d1 in 1..31 && d2 in 1..31 && d1 <= d2) {
+            for (d in d1..d2) daysSet.add(d)
+        }
+    }
+
+    // 2. Ищем перечисления с дробью: "12, 13, 15/10" или "1, 2/11"
+    val listSlashRegex = Regex("((?:\\d{1,2}\\s*,\\s*)*\\d{1,2})[/.\\-](\\d{1,2})")
+    for (lm in listSlashRegex.findAll(clean)) {
+        // Проверяем, не был ли этот кусок частью "с X по Y"
+        val prefix = clean.substring(0, lm.range.first)
+        if (prefix.trimEnd().endsWith("с", true) || prefix.trimEnd().endsWith("по", true) || prefix.trimEnd().endsWith("кроме", true) || prefix.trimEnd().endsWith("кр.", true)) {
+            continue
+        }
+        lm.groupValues[1].split(",").forEach { p ->
+            val d = p.trim().toIntOrNull()
+            if (d != null && d in 1..31) daysSet.add(d)
+        }
+    }
+
+    // 3. Ищем перечисления со словом месяца: "15, 23 октября" или "только 12/10"
+    val onlyMatch = Regex("(?i)только\\s*(\\d{1,2})").find(clean)
+    if (onlyMatch != null) {
+        val d = onlyMatch.groupValues[1].toIntOrNull()
+        if (d != null && d in 1..31) daysSet.add(d)
+    }
+
+    if (daysSet.isEmpty()) {
+        val wordListMatch = Regex("((?:\\d{1,2}\\s*,\\s*)*\\d{1,2})\\s+[а-я]{3,}").find(clean)
+        if (wordListMatch != null) {
+            wordListMatch.groupValues[1].split(",").forEach { p ->
+                val d = p.trim().toIntOrNull()
+                if (d != null && d in 1..31) daysSet.add(d)
+            }
+        }
+    }
+
+    // 4. Исключаем дни "кроме X" / "кр. X"
+    val exceptRegex = Regex("(?i)(?:кроме|кр\\.?)\\s*(\\d{1,2})")
+    for (em in exceptRegex.findAll(clean)) {
+        val exDay = em.groupValues[1].toIntOrNull()
+        if (exDay != null) daysSet.remove(exDay)
+    }
+
+    return CalendarDaySet(
+        monthNum = mNum,
+        monthName = mName,
+        days = daysSet.toList(),
+        fallbackLabel = clean.ifEmpty { "По датам телеграммы" }
+    )
+}
+
+// Форматирует список чисел (например [1, 2] или [3, 4, 5, 6]) в красивый заголовок: "1, 2 ноября" или "с 3 по 6 ноября"
+fun formatDaysBlockHeader(days: List<Int>, monthName: String): String {
+    if (days.isEmpty()) return "По датам телеграммы"
+    val sorted = days.sorted()
+    val isContiguous = (sorted.last() - sorted.first() + 1 == sorted.size)
+    return when {
+        sorted.size == 1 -> "${sorted.first()} $monthName"
+        isContiguous && sorted.size >= 3 -> "с ${sorted.first()} по ${sorted.last()} $monthName"
+        else -> "${sorted.joinToString(", ")} $monthName"
+    }
 }
 
 // ==================== ОПРЕДЕЛЕНИЕ ПУТИ ДЛЯ СХОДНИ И ХИМОК ====================
@@ -429,7 +442,6 @@ fun resolveTrackForStation(
         return formatTrackBadgeForStation(stationNorm, "", afishaHint)
     }
     val stOrder = STATION_ORDER_INDEX[stationNorm] ?: return ""
-    val isExpress7000 = trainNum.startsWith("7") && !trainNum.startsWith("72") && !trainNum.startsWith("73") && !trainNum.startsWith("74")
 
     for (rule in rules) {
         val idx1 = STATION_ORDER_INDEX[rule.fromStationKey] ?: continue
@@ -442,15 +454,7 @@ fun resolveTrackForStation(
             val isEndBoundary = (isMovingTowardsMoscow && stOrder == maxIdx && minIdx < maxIdx) ||
                     (!isMovingTowardsMoscow && stOrder == minIdx && minIdx < maxIdx)
             if (isEndBoundary && rules.size > 1) continue
-
-            val isImportantTrackChange = when {
-                isExpress7000 && (rule.trackNumber == "1" || rule.trackNumber == "2") -> true
-                !isExpress7000 && (rule.trackNumber == "3" || rule.trackNumber == "4") -> true
-                else -> true
-            }
-            if (isImportantTrackChange) {
-                return formatTrackBadgeForStation(stationNorm, rule.trackNumber)
-            }
+            return formatTrackBadgeForStation(stationNorm, rule.trackNumber)
         }
     }
     return ""
@@ -469,20 +473,14 @@ fun loadAfishaDatabase(afishaFile: File?): Map<String, AfishaTrainInfo> {
             val wb = WorkbookFactory.create(fis)
             for (sIdx in 0 until wb.numberOfSheets) {
                 val sheet = wb.getSheetAt(sIdx)
-                val stationRows = mutableMapOf<Int, String>()
-                for (r in 5..sheet.lastRowNum) {
-                    val cellVal = sheet.getRow(r)?.getCell(0)?.toString()?.trim() ?: ""
-                    if (cellVal.isNotEmpty() && !cellVal.contains("Условные", true) && !cellVal.contains("Расписание", true)) {
-                        stationRows[r] = cellVal
-                    }
-                }
 
-                var headerRowIdx = 3
-                for (r in 0..8) {
+                // Сначала находим строку заголовков с номерами поездов (может быть строка 1 в тестовой Афише или строка 4 в большой!)
+                var headerRowIdx = 0
+                for (r in 0..10) {
                     val row = sheet.getRow(r) ?: continue
                     var foundTrains = 0
-                    for (c in 1..minOf(40, row.lastCellNum.toInt())) {
-                        val v = row.getCell(c)?.toString()?.trim() ?: ""
+                    for (c in 1..minOf(50, row.lastCellNum.toInt())) {
+                        val v = row.getCell(c)?.toString()?.trim()?.replace(".0", "") ?: ""
                         if (Regex("\\b\\d{4}\\b").containsMatchIn(v)) foundTrains++
                     }
                     if (foundTrains >= 3) {
@@ -491,12 +489,27 @@ fun loadAfishaDatabase(afishaFile: File?): Map<String, AfishaTrainInfo> {
                     }
                 }
 
+                // Собираем все строки станций СРАЗУ после строки заголовков (чтобы Крюково, Сходня, Подрезково на строках 2..5 никогда не терялись!)
+                val stationRows = mutableMapOf<Int, String>()
+                for (r in (headerRowIdx + 1)..sheet.lastRowNum) {
+                    val cellVal = sheet.getRow(r)?.getCell(0)?.toString()?.trim() ?: ""
+                    if (cellVal.isNotEmpty() &&
+                        !cellVal.contains("Условные", true) &&
+                        !cellVal.contains("Расписание", true) &&
+                        !cellVal.equals("изм", true) &&
+                        !cellVal.equals("отм", true)
+                    ) {
+                        stationRows[r] = cellVal
+                    }
+                }
+
                 val hRow = sheet.getRow(headerRowIdx) ?: continue
                 val subRow = sheet.getRow(headerRowIdx + 1)
+                val subRowIsModifiers = subRow?.getCell(0)?.toString()?.trim().isNullOrEmpty()
 
                 for (c in 1..hRow.lastCellNum) {
                     val v1 = hRow.getCell(c)?.toString()?.trim()?.replace(".0", "") ?: ""
-                    val v2 = subRow?.getCell(c)?.toString()?.trim() ?: ""
+                    val v2 = if (subRowIsModifiers) (subRow?.getCell(c)?.toString()?.trim() ?: "") else ""
                     val combined = "$v1 $v2".trim()
                     val numMatch = Regex("\\b(\\d{4})\\b").find(combined) ?: continue
                     val trainNum = numMatch.groupValues[1]
@@ -620,6 +633,27 @@ fun readDocumentText(file: File): String {
     } catch (_: Exception) { "" }
 }
 
+// Точная проверка: является ли строка началом НОВОГО поезда (чтобы никогда не обрывать текст расписания при переносе строки!)
+fun isStartOfNewTrainLine(line: String, inCancelBlock: Boolean, inAppointBlock: Boolean): Pair<Boolean, String> {
+    // 1. Явный префикс: "нр. 6103", "поезд № 7001", "№ 6301"
+    val explicitMatch = Regex("(?i)^(?:нр\\.?|поезд\\s*№?|№)\\s*:?\\s*([67]\\d{3}(?:/[67]\\d{3})?)\\b").find(line)
+    if (explicitMatch != null) {
+        return Pair(true, explicitMatch.groupValues[1])
+    }
+    // 2. Без префикса "нр.", например "7001 Крюково отменен" или "6301 Крюково - Москва" (НО не время "12:36:30"!)
+    val bareMatch = Regex("^([67]\\d{3}(?:/[67]\\d{3})?)(?![:.\\d])\\s+([А-Яа-яЁё].*)").find(line)
+    if (bareMatch != null) {
+        val rest = bareMatch.groupValues[2]
+        val hasRouteOrStatus = inCancelBlock || inAppointBlock ||
+                rest.contains("отмен", true) || rest.contains("назнач", true) ||
+                Regex("[-–—]").containsMatchIn(rest.take(35))
+        if (hasRouteOrStatus) {
+            return Pair(true, bareMatch.groupValues[1])
+        }
+    }
+    return Pair(false, "")
+}
+
 fun parseTelegramDocument(file: File): List<TelegramTrainEvent> {
     val rawText = readDocumentText(file)
     if (rawText.isBlank()) return emptyList()
@@ -635,7 +669,6 @@ fun parseTelegramDocument(file: File): List<TelegramTrainEvent> {
     val defaultDateGroup = globalDatesMatch?.value?.trim() ?: "По датам телеграммы"
 
     val events = mutableListOf<TelegramTrainEvent>()
-    // Применяем предобработку каждой строки (разделение слипшихся "7001крюково", "Сходня12:40" и т.д.)
     val lines = rawText.lines().map { preprocessTelegramLine(it) }
 
     var inCancelBlock = false
@@ -681,34 +714,20 @@ fun parseTelegramDocument(file: File): List<TelegramTrainEvent> {
             continue
         }
 
-        // Распознает как "нр. 7001 Крюково", так и просто "7001 Крюково отменен" (после разделения пробелом)
-        val trainStartRegex = Regex("(?i)^(?:(?:нр\\.?|поезд\\s*№?|№)\\s*:?\\s*)?([67]\\d{3}(?:/[67]\\d{3})?)\\b")
-        val tm = trainStartRegex.find(line)
-        val looksLikeTrainHeader = tm != null && (
-                line.startsWith("нр", true) ||
-                        line.startsWith("поезд", true) ||
-                        line.startsWith("№") ||
-                        inCancelBlock ||
-                        inAppointBlock ||
-                        line.contains("отмен", true) ||
-                        line.contains("назнач", true) ||
-                        Regex("[-–—]").containsMatchIn(line)
-                )
+        val (isTrainStart, trainNum) = isStartOfNewTrainLine(line, inCancelBlock, inAppointBlock)
 
-        if (tm != null && looksLikeTrainHeader && !inBologoeSection) {
-            val trainNum = tm.groupValues[1]
-
+        if (isTrainStart && !inBologoeSection) {
             val blockLines = mutableListOf(line)
             var j = i + 1
             while (j < lines.size) {
                 val nl = lines[j]
                 if (nl.isEmpty()) { j++; continue }
-                val nextTm = trainStartRegex.find(nl)
-                val nextIsTrain = nextTm != null && (nl.startsWith("нр", true) || nl.startsWith("поезд", true) || nl.startsWith("№") || inCancelBlock || inAppointBlock || nl.contains("отмен", true))
+                val (nextIsTrain, _) = isStartOfNewTrainLine(nl, inCancelBlock, inAppointBlock)
                 if (nextIsTrain ||
-                    Regex("(?i)^(?:нр\\.?|поезд\\s*№?)\\s*\\d{1,4}").containsMatchIn(nl) ||
+                    Regex("(?i)^(?:нр\\.?|поезд\\s*№?)\\s*\\d{1,3}\\b").containsMatchIn(nl) ||
                     Regex("(?i)(?:^|\\s|[0-9.]+)(?:отменить|не назначать|назначить|изменить(?:\\s+расписание)?|обороты)\\s*[:(]").containsMatchIn(nl) ||
                     nl.startsWith("Четным пригородным", true) ||
+                    nl.startsWith("Четные и нечетные", true) ||
                     nl.startsWith("Поздний выход", true)
                 ) {
                     break
@@ -729,12 +748,12 @@ fun parseTelegramDocument(file: File): List<TelegramTrainEvent> {
             val dateParen = allParens.firstOrNull { Regex("\\d{1,2}[/.\\-]\\d{1,2}|нояб|окт").containsMatchIn(it.lowercase()) }
             val inlineDate = Regex("(?i)(?:только\\s*\\d{1,2}[/.\\-]\\d{1,2}|с\\s*\\d{1,2}[/.\\-]\\d{1,2}\\s*по\\s*\\d{1,2}[/.\\-]\\d{1,2}[^)]*|\\d{1,2}(?:,\\s*\\d{1,2})+/[01]?\\d)").find(line)?.value
             val rawDates = dateParen ?: inlineDate ?: currentSectionDates.ifEmpty { defaultDateGroup }
-            val formattedDates = formatTelegramDateGroup(rawDates, defaultDateGroup)
+            val calendarDaySet = parseCalendarDays(rawDates, defaultDateGroup)
 
             val partialMatch = Regex("(?i)\\(на\\s+участке\\s+([^)]+)\\)").find(line)
             val partialCancel = partialMatch?.groupValues?.get(1)?.trim() ?: ""
 
-            var routePart = line.substring(tm.range.last + 1)
+            var routePart = line.substringAfter(trainNum)
                 .replace(":", " ")
                 .replace(Regex("(?i)отменен[а-я]*|отменить|назначен[а-я]*"), " ")
                 .replace(Regex("\\([^)]*\\)"), " ")
@@ -802,6 +821,7 @@ fun parseTelegramDocument(file: File): List<TelegramTrainEvent> {
                 val m = segRegex.find(seg) ?: continue
                 val rawSt = m.groupValues[1]
                     .replace(Regex("(?i)действующим\\s+расписанием"), "")
+                    .replace(Regex("(?i)согласно\\s+ранее.*"), "")
                     .replace(Regex("(?i)до\\s+ст\\.?"), "")
                     .replace(Regex("(?i)далее.*"), "")
                     .trim()
@@ -830,7 +850,7 @@ fun parseTelegramDocument(file: File): List<TelegramTrainEvent> {
                 TelegramTrainEvent(
                     trainNum = trainNum,
                     rawDates = rawDates,
-                    formattedDateGroup = formattedDates,
+                    calendarDays = calendarDaySet,
                     telegramHeader = telHeader,
                     routeFromTelegram = routeClean,
                     isCancelledFull = isFullCancel,
@@ -873,7 +893,7 @@ fun parseOtmenyFiles(files: List<File>): Map<String, String> {
     return map
 }
 
-// ==================== ЯДРО СРАВНЕНИЯ И АНАЛИТИКИ TRAIN-R ====================
+// ==================== ЯДРО СРАВНЕНИЯ И ХРОНОЛОГИЧЕСКОЙ РАЗВЕРТКИ ДАТ ====================
 
 fun buildRemainingStopsNote(
     targetKey: String,
@@ -902,6 +922,68 @@ fun buildRemainingStopsNote(
     return ""
 }
 
+// Группирует записи строго по календарным дням (с меньшего числа к большему) и объединяет соседние дни с одинаковым списком поездов!
+fun expandAndGroupChronologically(rawItems: List<Pair<CalendarDaySet, StationComparisonRow>>): List<StationComparisonRow> {
+    if (rawItems.isEmpty()) return emptyList()
+
+    val withCalendar = rawItems.filter { it.first.days.isNotEmpty() }
+    val withoutCalendar = rawItems.filter { it.first.days.isEmpty() }.map { it.second }
+
+    if (withCalendar.isEmpty()) return withoutCalendar
+
+    val monthName = withCalendar.first().first.monthName
+    val allDaysSorted = withCalendar.flatMap { it.first.days }.distinct().sorted()
+
+    // Для каждого конкретного числа календаря собираем его список поездов (отсортированный по времени отправления)
+    val dayToRows = LinkedHashMap<Int, List<StationComparisonRow>>()
+    for (day in allDaysSorted) {
+        val rowsForDay = withCalendar
+            .filter { day in it.first.days }
+            .map { it.second }
+            .distinctBy { "${it.trainNum}_${it.finalChangeText}" }
+            .sortedBy { if (it.afishaTime != "-") it.afishaTime else it.telegramTime }
+        if (rowsForDay.isNotEmpty()) {
+            dayToRows[day] = rowsForDay
+        }
+    }
+
+    // Объединяем подряд идущие числа календаря, если в эти дни действует АБСОЛЮТНО ОДИНАКОВЫЙ список изменений поездов
+    val result = mutableListOf<StationComparisonRow>()
+    var currentDaysGroup = mutableListOf<Int>()
+    var currentSignature = ""
+    var currentTemplateRows = emptyList<StationComparisonRow>()
+
+    fun flushGroup() {
+        if (currentDaysGroup.isEmpty()) return
+        val header = formatDaysBlockHeader(currentDaysGroup, monthName)
+        val firstDay = currentDaysGroup.first()
+        currentTemplateRows.forEach { r ->
+            result.add(r.copy(dateGroup = header, sortDayKey = firstDay))
+        }
+    }
+
+    for ((day, rows) in dayToRows) {
+        val sig = rows.joinToString("|") { "${it.trainNum}:${it.finalChangeText}" }
+        val isConsecutive = currentDaysGroup.isEmpty() || (day == currentDaysGroup.last() + 1)
+
+        if (currentDaysGroup.isEmpty()) {
+            currentDaysGroup.add(day)
+            currentSignature = sig
+            currentTemplateRows = rows
+        } else if (sig == currentSignature && isConsecutive) {
+            currentDaysGroup.add(day)
+        } else {
+            flushGroup()
+            currentDaysGroup = mutableListOf(day)
+            currentSignature = sig
+            currentTemplateRows = rows
+        }
+    }
+    flushGroup()
+
+    return result + withoutCalendar
+}
+
 fun buildStationComparison(
     targetStationDisplay: String,
     afishaDb: Map<String, AfishaTrainInfo>,
@@ -909,8 +991,10 @@ fun buildStationComparison(
     otmenyMap: Map<String, String>
 ): Pair<List<StationComparisonRow>, List<StationComparisonRow>> {
     val targetKey = normalizeStationKey(targetStationDisplay)
-    val toMoscowRows = mutableListOf<StationComparisonRow>()
-    val fromMoscowRows = mutableListOf<StationComparisonRow>()
+    val targetOrder = STATION_ORDER_INDEX[targetKey] ?: 27
+
+    val toMoscowRaw = mutableListOf<Pair<CalendarDaySet, StationComparisonRow>>()
+    val fromMoscowRaw = mutableListOf<Pair<CalendarDaySet, StationComparisonRow>>()
     val handledTrains = mutableSetOf<String>()
 
     for (ev in telegramEvents) {
@@ -952,8 +1036,9 @@ fun buildStationComparison(
         val trackBadge = resolveTrackForStation(targetKey, baseNum, dir, ev.trackRules, afTrackHint)
         val trackSuffix = if (trackBadge.isNotEmpty()) " $trackBadge" else ""
 
+        // Если Афиша загружена, но поезд вообще не проходит через выбранную станцию ни в Афише, ни в Телеграмме — пропускаем
         val passesStation = afTimeAtStation.isNotEmpty() || telPairAtStation != null || isStationInSkippedList || isStationInAppointedList ||
-                (afInfo == null && (ev.isCancelledFull || ev.isAppointedFull))
+                (afishaDb.isEmpty() && (ev.isCancelledFull || ev.isAppointedFull))
         if (!passesStation) continue
 
         var statusText = ""
@@ -961,13 +1046,16 @@ fun buildStationComparison(
         var isPassNoStop = false
         var isApp = false
 
+        // 1. Полная отмена поезда
         if (ev.isCancelledFull) {
             isCanc = true
             statusText = "ОТМЕНЕН"
-        } else if (ev.partialCancelSection.isNotEmpty()) {
+        }
+        // 2. Частичная отмена на участке
+        else if (ev.partialCancelSection.isNotEmpty()) {
             val secNorm = ev.partialCancelSection.lowercase()
             if (("крюков" in secNorm || "зеленогр" in secNorm) && "подсолнеч" in secNorm && dir == Direction.FROM_MOSCOW) {
-                statusText = if (telTimeAtStation.isNotEmpty() && telTimeAtStation != afTimeAtStation) {
+                statusText = if (telTimeAtStation.isNotEmpty() && afTimeAtStation.isNotEmpty() && telTimeAtStation != afTimeAtStation) {
                     "отправится в $telTimeAtStation$trackSuffix следует до Крюково"
                 } else {
                     "следует до Крюково"
@@ -980,14 +1068,20 @@ fun buildStationComparison(
                 isCanc = true
                 statusText = "ОТМЕНЕН (на уч. ${ev.partialCancelSection})"
             }
-        } else if (ev.isAppointedFull) {
+        }
+        // 3. Назначение нового поезда
+        else if (ev.isAppointedFull) {
             if (telTimeAtStation.isEmpty() && afTimeAtStation.isEmpty()) continue
             isApp = true
             val t = telTimeAtStation.ifEmpty { afTimeAtStation }
             val stopsNote = buildRemainingStopsNote(targetKey, ev.stationTimes, true, ev.explicitNoStopsText)
             val notePart = if (stopsNote.isNotEmpty()) ". $stopsNote" else ""
             statusText = "НАЗНАЧЕН в $t$trackSuffix$notePart"
-        } else {
+        }
+        // 4. Изменение расписания / остановок / путей
+        else {
+            val timeActuallyChanged = afTimeAtStation.isNotEmpty() && telTimeAtStation.isNotEmpty() && telTimeAtStation != afTimeAtStation
+
             if (isStationInAppointedList) {
                 isApp = true
                 val t = telTimeAtStation.ifEmpty { afTimeAtStation }
@@ -997,46 +1091,58 @@ fun buildStationComparison(
                 isPassNoStop = true
                 statusText = "ОТМЕНЕН (проследует без остановки)"
             } else if (telTimeAtStation.isNotEmpty() && telHasStop) {
-                if (afTimeAtStation.isNotEmpty() && telTimeAtStation != afTimeAtStation) {
-                    statusText = "отправится в $telTimeAtStation$trackSuffix"
-                } else if (afTimeAtStation.isEmpty()) {
-                    statusText = "отправится в $telTimeAtStation$trackSuffix"
-                } else if (trackBadge.isNotEmpty()) {
+                // ВАЖНО: Пишем "отправится в ЧЧ:ММ" ТОЛЬКО если время реально изменилось относительно Афиши (или изменился путь на Сходне/Химках, или Афиша вообще не загружена)!
+                if (timeActuallyChanged || trackBadge.isNotEmpty() || afishaDb.isEmpty()) {
                     statusText = "отправится в $telTimeAtStation$trackSuffix"
                 }
             }
 
+            // Проверяем, есть ли у поезда отмененные или назначенные остановки ДАЛЬШЕ по ходу следования от выбранной станции
             if (!isCanc) {
-                val otherSkipped = ev.skippedStops.filter { normalizeStationKey(it) != targetKey }
-                val otherAppointed = ev.appointedStops.filter { normalizeStationKey(it) != targetKey }
+                val otherSkippedAhead = ev.skippedStops.filter { stDisp ->
+                    val k = normalizeStationKey(stDisp)
+                    val ord = STATION_ORDER_INDEX[k] ?: return@filter false
+                    if (dir == Direction.TO_MOSCOW) ord > targetOrder else ord < targetOrder
+                }
+                val otherAppointedAhead = ev.appointedStops.filter { stDisp ->
+                    val k = normalizeStationKey(stDisp)
+                    val ord = STATION_ORDER_INDEX[k] ?: return@filter false
+                    if (dir == Direction.TO_MOSCOW) ord > targetOrder else ord < targetOrder
+                }
 
-                if (otherSkipped.isNotEmpty()) {
-                    val suffix = "Отменены остановки: ${otherSkipped.joinToString(", ")}."
+                if (otherSkippedAhead.isNotEmpty()) {
+                    val suffix = "Отменены остановки: ${otherSkippedAhead.joinToString(", ")}."
                     statusText = if (statusText.isNotEmpty()) "$statusText. $suffix" else suffix
                 }
-                if (otherAppointed.isNotEmpty()) {
-                    val suffix = "Назначены остановки: ${otherAppointed.joinToString(", ")}."
+                if (otherAppointedAhead.isNotEmpty()) {
+                    val suffix = "Назначены остановки: ${otherAppointedAhead.joinToString(", ")}."
                     statusText = if (statusText.isNotEmpty()) "$statusText. $suffix" else suffix
                 }
 
-                if (otherSkipped.isEmpty()) {
-                    val noStopsNote = buildRemainingStopsNote(targetKey, ev.stationTimes, false, ev.explicitNoStopsText)
-                    if (noStopsNote.isNotEmpty()) {
-                        statusText = if (statusText.isNotEmpty()) "$statusText. $noStopsNote" else noStopsNote
-                    }
+                if (otherSkippedAhead.isEmpty() && ev.explicitNoStopsText.isNotEmpty()) {
+                    statusText = if (statusText.isNotEmpty()) "$statusText. ${ev.explicitNoStopsText}" else ev.explicitNoStopsText
                 }
             }
         }
 
         val otmStatus = otmenyMap[baseNum] ?: ""
+
+        // ЖЕСТКИЙ ФИЛЬТР: если по данной станции ни время, ни остановки не изменились — поезд НЕ включается в выгрузку!
         if (statusText.isEmpty() && otmStatus.isEmpty()) continue
 
         val hasDiscrep = otmStatus.isNotEmpty() && statusText.isNotEmpty() &&
                 !otmStatus.contains(telTimeAtStation.ifEmpty { "___" }) &&
                 !(otmStatus.contains("ОТМЕНЕН", true) && isCanc)
 
+        val initialDateHeader = if (ev.calendarDays.days.isNotEmpty()) {
+            formatDaysBlockHeader(ev.calendarDays.days, ev.calendarDays.monthName)
+        } else {
+            ev.calendarDays.fallbackLabel
+        }
+
         val row = StationComparisonRow(
-            dateGroup = ev.formattedDateGroup,
+            dateGroup = initialDateHeader,
+            sortDayKey = ev.calendarDays.days.firstOrNull() ?: 999,
             trainNum = ev.trainNum,
             daysFlag = afInfo?.daysFlag ?: "",
             routeString = routeStr,
@@ -1061,7 +1167,11 @@ fun buildStationComparison(
             rawTelegramText = ev.rawBlockText
         )
 
-        if (dir == Direction.TO_MOSCOW) toMoscowRows.add(row) else fromMoscowRows.add(row)
+        if (dir == Direction.TO_MOSCOW) {
+            toMoscowRaw.add(Pair(ev.calendarDays, row))
+        } else {
+            fromMoscowRaw.add(Pair(ev.calendarDays, row))
+        }
         handledTrains.add(baseNum)
     }
 
@@ -1074,8 +1184,10 @@ fun buildStationComparison(
         val routeStr = afInfo?.routeString ?: if (dir == Direction.TO_MOSCOW) "Крюково – Москва" else "Москва – Крюково"
         val destLabel = afInfo?.destinationLabel ?: if (dir == Direction.TO_MOSCOW) "до Москвы" else "до Крюково"
 
+        val emptyCal = CalendarDaySet(10, "октября", emptyList(), "По файлу «Отмены»")
         val row = StationComparisonRow(
             dateGroup = "По файлу «Отмены»",
+            sortDayKey = 999,
             trainNum = num,
             daysFlag = afInfo?.daysFlag ?: "",
             routeString = routeStr,
@@ -1099,21 +1211,16 @@ fun buildStationComparison(
             fullTelegramStations = emptyMap(),
             rawTelegramText = "Поезд присутствует в файле выгрузки «Отмены», но не найден в загруженных телеграммах."
         )
-        if (dir == Direction.TO_MOSCOW) toMoscowRows.add(row) else fromMoscowRows.add(row)
+        if (dir == Direction.TO_MOSCOW) toMoscowRaw.add(Pair(emptyCal, row)) else fromMoscowRaw.add(Pair(emptyCal, row))
     }
 
-    val comparator = compareBy<StationComparisonRow>(
-        { extractFirstDayForSort(it.dateGroup) },
-        { if (it.afishaTime != "-") it.afishaTime else it.telegramTime }
-    )
-
     return Pair(
-        toMoscowRows.distinctBy { "${it.dateGroup}_${it.trainNum}_${it.finalChangeText}" }.sortedWith(comparator),
-        fromMoscowRows.distinctBy { "${it.dateGroup}_${it.trainNum}_${it.finalChangeText}" }.sortedWith(comparator)
+        expandAndGroupChronologically(toMoscowRaw),
+        expandAndGroupChronologically(fromMoscowRaw)
     )
 }
 
-// ==================== ЭКСПОРТ ПО ЭТАЛОНУ «СХОДНЯ НА МОСКВУ / ОТ МОСКВЫ» ====================
+// ==================== ЭКСПОРТ ПО ЭТАЛОНУ С СТРОГИМ ПОРЯДКОМ ДАТ ====================
 
 fun exportStationFilesToFolders(
     station: String,
@@ -1130,15 +1237,16 @@ fun exportStationFilesToFolders(
             out.println("$station    Изменения в графике движения эл/поездов")
             out.println("на Ленинградский вокзал, Ипподром")
             val grouped = toMoscow.groupBy { it.dateGroup }
-            for (dKey in grouped.keys.sortedBy { extractFirstDayForSort(it) }) {
+            for ((dKey, rowsInGroup) in grouped) {
                 out.println(dKey)
-                for (r in grouped[dKey] ?: emptyList()) {
-                    if (r.isAppointedAtStation && r.afishaTime == "-") {
+                for (r in rowsInGroup) {
+                    if (r.isAppointedAtStation) {
                         val cleanApp = r.finalChangeText.removePrefix("НАЗНАЧЕН ")
                         out.println("        Назначается №${r.trainNum} ${r.destinationLabel} $cleanApp")
+                    } else if (r.afishaTime != "-") {
+                        out.println("        №${r.trainNum} ${r.destinationLabel} отправлением в ${r.afishaTime} - ${r.finalChangeText}")
                     } else {
-                        val depTime = if (r.afishaTime != "-") r.afishaTime else r.telegramTime
-                        out.println("        №${r.trainNum} ${r.destinationLabel} отправлением в $depTime - ${r.finalChangeText}")
+                        out.println("        №${r.trainNum} ${r.destinationLabel} - ${r.finalChangeText}")
                     }
                 }
             }
@@ -1151,15 +1259,16 @@ fun exportStationFilesToFolders(
             out.println("$station   Изменения в графике движения эл/поездов")
             out.println("от Ленинградского вокзала, от Ипподрома")
             val grouped = fromMoscow.groupBy { it.dateGroup }
-            for (dKey in grouped.keys.sortedBy { extractFirstDayForSort(it) }) {
+            for ((dKey, rowsInGroup) in grouped) {
                 out.println(dKey)
-                for (r in grouped[dKey] ?: emptyList()) {
-                    if (r.isAppointedAtStation && r.afishaTime == "-") {
+                for (r in rowsInGroup) {
+                    if (r.isAppointedAtStation) {
                         val cleanApp = r.finalChangeText.removePrefix("НАЗНАЧЕН ")
                         out.println("        Назначается №${r.trainNum} ${r.destinationLabel} $cleanApp")
+                    } else if (r.afishaTime != "-") {
+                        out.println("        №${r.trainNum} ${r.destinationLabel} отправлением в ${r.afishaTime} - ${r.finalChangeText}")
                     } else {
-                        val depTime = if (r.afishaTime != "-") r.afishaTime else r.telegramTime
-                        out.println("        №${r.trainNum} ${r.destinationLabel} отправлением в $depTime - ${r.finalChangeText}")
+                        out.println("        №${r.trainNum} ${r.destinationLabel} - ${r.finalChangeText}")
                     }
                 }
             }
@@ -1237,7 +1346,7 @@ fun TrainRApp() {
             withContext(Dispatchers.IO) {
                 val loaded = loadAfishaDatabase(afishaFile)
                 afishaDb = loaded
-                statusText = "Базовая Афиша активна (распознано ${loaded.size} ниток поездов с синонимами станций и путями)."
+                statusText = "Базовая Афиша активна (распознано ${loaded.size} ниток поездов со всеми станциями)."
             }
         }
     }
@@ -1255,7 +1364,7 @@ fun TrainRApp() {
     fun recalculateStation(stName: String) {
         scope.launch {
             isBusy = true
-            statusText = "Анализ расписания, сокращений станций и путей по станции $stName..."
+            statusText = "Хронологическая сверка расписания по станции $stName..."
             val (toM, fromM) = withContext(Dispatchers.IO) {
                 val parsedTels = telegramFiles.flatMap { parseTelegramDocument(it) }
                 val parsedOtm = parseOtmenyFiles(otmenyFiles)
@@ -1266,7 +1375,7 @@ fun TrainRApp() {
             toMoscowList = toM
             fromMoscowList = fromM
             isBusy = false
-            statusText = "Станция $stName: найдено изменений До Москвы/Ипподрома — ${toM.size}, От Москвы — ${fromM.size}."
+            statusText = "Станция $stName: найдено реальных изменений До Москвы/Ипподрома — ${toM.size}, От Москвы — ${fromM.size}."
         }
     }
 
@@ -1287,10 +1396,12 @@ fun TrainRApp() {
                 }
 
                 if (results.isEmpty()) {
+                    val matchingEv = parsedTels.firstOrNull { it.trainNum.contains(q, true) }
                     afishaDb.values.filter { it.trainNum.contains(q, true) }.forEach { af ->
                         results.add(
                             StationComparisonRow(
-                                dateGroup = "Действующий график (Афиша)",
+                                dateGroup = matchingEv?.calendarDays?.fallbackLabel ?: "Действующий график (Афиша)",
+                                sortDayKey = 1,
                                 trainNum = af.trainNum,
                                 daysFlag = af.daysFlag,
                                 routeString = af.routeString,
@@ -1298,7 +1409,7 @@ fun TrainRApp() {
                                 isMcd = af.isMcd,
                                 direction = af.direction,
                                 stationName = "Все станции маршрута",
-                                telegramHeader = "Без изменений в телеграммах",
+                                telegramHeader = matchingEv?.telegramHeader ?: "Без изменений в телеграммах",
                                 afishaTime = af.stationTimes.values.firstOrNull() ?: "-",
                                 telegramTime = "-",
                                 otmenyFileStatus = "",
@@ -1306,13 +1417,13 @@ fun TrainRApp() {
                                 isCancelledAtStation = false,
                                 isPassWithoutStop = false,
                                 isAppointedAtStation = false,
-                                skippedStopsSummary = "",
-                                appointedStopsSummary = "",
+                                skippedStopsSummary = matchingEv?.skippedStops?.joinToString(", ") ?: "",
+                                appointedStopsSummary = matchingEv?.appointedStops?.joinToString(", ") ?: "",
                                 trackSummaryForStation = "",
                                 hasDiscrepancyWithOtmeny = false,
                                 fullAfishaStations = af.stationTimes,
-                                fullTelegramStations = emptyMap(),
-                                rawTelegramText = "Поезд №${af.trainNum} (${af.routeString}) найден в базовой Афише. В загруженных телеграммах изменений по нему не объявлено."
+                                fullTelegramStations = matchingEv?.stationTimes ?: emptyMap(),
+                                rawTelegramText = matchingEv?.rawBlockText ?: "Поезд №${af.trainNum} (${af.routeString}) найден в базовой Афише. В загруженных телеграммах изменений по нему не объявлено."
                             )
                         )
                     }
@@ -1366,7 +1477,12 @@ fun TrainRApp() {
                                     try {
                                         FileInputStream(f.first()).use { inp -> FileOutputStream(cachedAfisha).use { out -> inp.copyTo(out) } }
                                         afishaFile = cachedAfisha
-                                    } catch (_: Exception) { afishaFile = f.first() }
+                                        afishaDb = loadAfishaDatabase(cachedAfisha)
+                                    } catch (_: Exception) {
+                                        afishaFile = f.first()
+                                        afishaDb = loadAfishaDatabase(f.first())
+                                    }
+                                    recalculateStation(currentStation)
                                 }
                             },
                             onClear = {
@@ -1623,7 +1739,7 @@ fun TrainTableSection(
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFFE2E8F0)).padding(vertical = 8.dp, horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("ДАТЫ (ПЕРИОД)", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(135.dp))
+            Text("ДАТЫ (ПО ПОРЯДКУ)", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(135.dp))
             if (showStationColumn) {
                 Text("СТАНЦИЯ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(105.dp))
             }
@@ -1833,13 +1949,15 @@ fun ReportTrainLine(r: StationComparisonRow, accent: Color, onClick: () -> Unit)
     }
 }
 
-// ==================== МОДАЛЬНОЕ ДОСЬЕ КОНКРЕТНОГО ПОЕЗДА ====================
+// ==================== МОДАЛЬНОЕ ДОСЬЕ КОНКРЕТНОГО ПОЕЗДА (С ПОЛНЫМ СКРОЛЛОМ ТЕКСТА) ====================
 
 @Composable
 fun TrainDossierDialog(row: StationComparisonRow, onDismiss: () -> Unit) {
+    val rawTextScrollState = rememberScrollState()
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
-            modifier = Modifier.width(760.dp).heightIn(min = 420.dp, max = 640.dp),
+            modifier = Modifier.width(820.dp).heightIn(min = 500.dp, max = 740.dp),
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White),
             elevation = CardDefaults.cardElevation(8.dp)
@@ -1870,7 +1988,7 @@ fun TrainDossierDialog(row: StationComparisonRow, onDismiss: () -> Unit) {
                     Text("Назначены остановки: ${row.appointedStopsSummary}", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TrainRTheme.GreenSuccess)
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 Text("Сравнение расписания по всем станциям следования:", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = TrainRTheme.NavyDark)
                 Spacer(modifier = Modifier.height(4.dp))
 
@@ -1899,9 +2017,23 @@ fun TrainDossierDialog(row: StationComparisonRow, onDismiss: () -> Unit) {
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Исходный текст из телеграммы:", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.TextSub)
-                Surface(modifier = Modifier.fillMaxWidth().height(70.dp), shape = RoundedCornerShape(6.dp), color = Color(0xFFF1F5F9)) {
-                    Text(row.rawTelegramText, fontSize = 10.sp, modifier = Modifier.padding(6.dp), color = TrainRTheme.NavyDark)
+                Text("Полный исходный текст по данному поезду из телеграммы (прокручивается):", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.NavyDark)
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                    modifier = Modifier.fillMaxWidth().height(150.dp),
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFFF1F5F9),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, TrainRTheme.BorderCol)
+                ) {
+                    Box(modifier = Modifier.fillMaxSize().padding(10.dp).verticalScroll(rawTextScrollState)) {
+                        Text(
+                            text = row.rawTelegramText,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TrainRTheme.NavyDark
+                        )
+                    }
                 }
             }
         }
