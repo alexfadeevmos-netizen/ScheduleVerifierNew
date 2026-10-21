@@ -64,8 +64,8 @@ object AppTheme {
     val DangerRed = Color(0xFFF73B3B) 
     val WarningOrange = Color(0xFFF97316)
     val BorderLight = Color(0xFFE2E8F0)
-    val TextPrimary = Color(0xFF0F172A) // Сделали основной текст максимально контрастным
-    val TextMuted = Color(0xFF475569)   // Сделали примечания темнее
+    val TextPrimary = Color(0xFF0F172A)
+    val TextMuted = Color(0xFF475569)
 }
 
 val ALL_STATIONS = listOf(
@@ -222,7 +222,6 @@ fun parseTelegramDetailed(telText: String, defaultPeriod: String): List<ParsedTr
             val dateRange = Regex("(?:с\\s*[0-9/.]+\\s*по\\s*[0-9/.]+.*)").find(line)?.value
             val datesRaw = dateInParens ?: dateRange ?: defaultPeriod
             
-            // Парсинг маршрута
             val trainLineText = line.substringBefore("(").substringBefore(" с ")
             val routeMatch = Regex("[А-Яа-яЁё]+\\s*(?:Пасс\\.?|Тов\\.?|ГРЭС|Моск\\.?|1|2)?\\s*[-–—]\\s*[А-Яа-яЁё]+\\s*(?:Пасс\\.?|Тов\\.?|ГРЭС|Моск\\.?|1|2)?").find(trainLineText)
             val parsedRoute = routeMatch?.value?.trim() ?: ""
@@ -324,7 +323,6 @@ fun analyzeMasterSchedule(
         vygruzki.forEach { f -> try { append(f.readText()).append("\n") } catch (_: Exception) {} }
     }
 
-    // Сканируем Афишу (если загружена) по ВСЕМ листам для поиска времени
     val afishaTimes = mutableMapOf<String, String>()
     if (afisha != null) {
         try {
@@ -370,16 +368,15 @@ fun analyzeMasterSchedule(
 
     val processedBlocks = mutableSetOf<String>()
 
-    // Анализ Телеграмм
     parsedBlocks.forEach { block ->
         val unpackedDates = unpackDates(block.datesRaw, defaultPeriod)
         val numOnly = block.trainNum.split("/").first()
         
-        // Определение направления по последней цифре (Четные - От Москвы, Нечетные - На Москву)
         val isEven = numOnly.lastOrNull { it.isDigit() }?.digitToInt()?.let { it % 2 == 0 } ?: false
         val dir = if (isEven) Direction.FROM_MOSCOW else Direction.TO_MOSCOW
 
         val afTime = afishaTimes[numOnly] ?: "-"
+        val dest = if (dir == Direction.TO_MOSCOW) "до Москвы" else "до Ипподрома/Твери"
         
         var vygStatusText = ""
         var vygTime = ""
@@ -421,18 +418,15 @@ fun analyzeMasterSchedule(
                 }
             }
 
-            // Фильтрация ложных изменений
             if (telStatusText == "отправится в $afTime") telStatusText = ""
             if (vygStatusText == "отправится в $afTime") vygStatusText = ""
 
             if (block.isCancelled || isPass || isApp || telStatusText.isNotEmpty() || (vygStatusText.isNotEmpty() && !vygStatusText.contains(telStatusText, true)) || block.stationsMap.keys.any { matchStationNames(targetStation, it) }) {
-                
-                // Только если реально есть изменение по телеграмме или выгрузке:
                 if (block.isCancelled || isPass || isApp || telStatusText.isNotEmpty() || vygStatusText.isNotEmpty()) {
                     val discrepancy = vygStatusText.isNotEmpty() && !vygStatusText.contains(telStatusText, true) && telStatusText != "ОТМЕНЕН"
                     
                     val record = MasterTrainRecord(
-                        dateGroup = dateHeader, trainNum = block.trainNum, daysInfo = block.daysInfo, station = targetStation, route = block.routeDesc,
+                        dateGroup = dateHeader, trainNum = block.trainNum, daysInfo = block.daysInfo, station = targetStation, destination = dest, route = block.routeDesc,
                         afishaTime = afTime, telegramTime = telTime, vygruzkaTime = vygTime, telStatusText = telStatusText, vygStatusText = vygStatusText,
                         isCancelled = block.isCancelled, isAppointed = isApp, hasDiscrepancy = discrepancy, telegramHeader = telHeader, direction = dir
                     )
@@ -443,7 +437,6 @@ fun analyzeMasterSchedule(
         }
     }
 
-    // Анализ Выгрузки (поезда которых нет в телеграмме)
     val vygTrainRegex = Regex("№([0-9]{4}(?:/[0-9]{4})?).*?отправлением в ([0-9:]+)\\s*-\\s*(.*?)(?=\\n|\$)")
     vygTrainRegex.findAll(vygText).forEach { match ->
         val fullNum = match.groupValues[1]
@@ -452,6 +445,7 @@ fun analyzeMasterSchedule(
         if (!processedBlocks.contains(numOnly)) {
             val isEven = numOnly.lastOrNull { it.isDigit() }?.digitToInt()?.let { it % 2 == 0 } ?: false
             val dir = if (isEven) Direction.FROM_MOSCOW else Direction.TO_MOSCOW
+            val dest = if (dir == Direction.TO_MOSCOW) "до Москвы" else "до Ипподрома/Твери"
             
             val vTime = match.groupValues[2]
             var vStat = match.groupValues[3].trim()
@@ -460,7 +454,7 @@ fun analyzeMasterSchedule(
             if (vStat == "отправится в $afTime") vStat = ""
             if (vStat.isNotEmpty()) {
                 val record = MasterTrainRecord(
-                    dateGroup = defaultPeriod, trainNum = fullNum, daysInfo = "", station = targetStation, route = "",
+                    dateGroup = defaultPeriod, trainNum = fullNum, daysInfo = "", station = targetStation, destination = dest, route = "",
                     afishaTime = afTime, telegramTime = "", vygruzkaTime = vTime, telStatusText = "", vygStatusText = vStat,
                     isCancelled = vStat.contains("ОТМЕНЕН", true), isAppointed = false, hasDiscrepancy = true, telegramHeader = "Выгрузка txt", direction = dir
                 )
@@ -490,7 +484,6 @@ fun exportMasterReports(station: String, toMoscow: List<MasterTrainRecord>, from
             grouped.keys.sortedBy { extractFirstDateNumber(it) }.forEach { dateGroup ->
                 out.println(dateGroup)
                 grouped[dateGroup]?.forEach { r ->
-                    // Вырезаем "(проследует без остановки)" для итоговой выгрузки
                     val status = r.telStatusText.ifEmpty { r.vygStatusText }.replace(" \\(проследует без остановки\\)".toRegex(), "")
                     val timePrefix = if (r.afishaTime == "-") r.telegramTime.ifEmpty { r.vygruzkaTime } else r.afishaTime
                     val destStr = if (r.route.isNotEmpty()) r.route else "до Москвы"
@@ -509,7 +502,6 @@ fun exportMasterReports(station: String, toMoscow: List<MasterTrainRecord>, from
             grouped.keys.sortedBy { extractFirstDateNumber(it) }.forEach { dateGroup ->
                 out.println(dateGroup)
                 grouped[dateGroup]?.forEach { r ->
-                    // Вырезаем "(проследует без остановки)"
                     val status = r.telStatusText.ifEmpty { r.vygStatusText }.replace(" \\(проследует без остановки\\)".toRegex(), "")
                     val timePrefix = if (r.afishaTime == "-") r.telegramTime.ifEmpty { r.vygruzkaTime } else r.afishaTime
                     out.println("        №${r.trainNum} ${r.daysInfo} отправлением в $timePrefix - $status")
@@ -701,13 +693,13 @@ fun App() {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Canvas(modifier = Modifier.size(14.dp)) { drawCircle(color = AppTheme.DangerRed) }
                                 Spacer(modifier = Modifier.width(10.dp))
-                                Text("Отменено поездов/остановок: ${cancList.size}", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = AppTheme.DangerRed)
+                                Text("Отменено поездов: ${cancList.size}", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = AppTheme.DangerRed)
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Canvas(modifier = Modifier.size(14.dp)) { drawCircle(color = AppTheme.SuccessGreen) }
                                 Spacer(modifier = Modifier.width(10.dp))
-                                Text("Назначено поездов/остановок: ${appList.size}", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = AppTheme.SuccessGreen)
+                                Text("Назначено поездов: ${appList.size}", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = AppTheme.SuccessGreen)
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -717,9 +709,9 @@ fun App() {
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Canvas(modifier = Modifier.size(14.dp)) { drawCircle(color = if(discrList.isNotEmpty()) AppTheme.DangerRed else AppTheme.TextPrimary) }
+                                Canvas(modifier = Modifier.size(14.dp)) { drawCircle(color = AppTheme.HeaderNavy) }
                                 Spacer(modifier = Modifier.width(10.dp))
-                                Text("Расхождений с выгрузками txt: ${discrList.size}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = if(discrList.isNotEmpty()) AppTheme.DangerRed else AppTheme.TextPrimary)
+                                Text("Расхождений с выгрузками txt: ${discrList.size}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AppTheme.HeaderNavy)
                             }
 
                             Spacer(modifier = Modifier.height(24.dp))
@@ -729,15 +721,15 @@ fun App() {
                             LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
                                 if (cancList.isNotEmpty()) {
                                     item { Text("Отмененные поезда:", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = AppTheme.DangerRed, modifier = Modifier.padding(bottom = 6.dp)) }
-                                    item { Text(cancList.joinToString(", ") { "№${it.trainNum} (${it.afishaTime.ifEmpty { it.telegramTime }})" }, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AppTheme.TextPrimary, modifier = Modifier.padding(bottom = 12.dp)) }
+                                    item { Text(cancList.joinToString(", ") { "№${it.trainNum} (${it.afishaTime.ifEmpty { it.telegramTime }}) ${it.destination}" }, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AppTheme.TextPrimary, modifier = Modifier.padding(bottom = 12.dp)) }
                                 }
                                 if (appList.isNotEmpty()) {
                                     item { Text("Назначенные поезда:", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = AppTheme.SuccessGreen, modifier = Modifier.padding(bottom = 6.dp)) }
-                                    item { Text(appList.joinToString(", ") { "№${it.trainNum} (${it.telegramTime})" }, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AppTheme.TextPrimary, modifier = Modifier.padding(bottom = 12.dp)) }
+                                    item { Text(appList.joinToString(", ") { "№${it.trainNum} (${it.telegramTime}) ${it.destination}" }, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AppTheme.TextPrimary, modifier = Modifier.padding(bottom = 12.dp)) }
                                 }
                                 if (discrList.isNotEmpty()) {
                                     item { Text("Расхождения с выгрузками:", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = AppTheme.WarningOrange, modifier = Modifier.padding(bottom = 6.dp)) }
-                                    item { Text(discrList.joinToString(", ") { "№${it.trainNum}" }, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AppTheme.TextPrimary, modifier = Modifier.padding(bottom = 12.dp)) }
+                                    item { Text(discrList.joinToString(", ") { "№${it.trainNum} (${it.afishaTime.ifEmpty { it.telegramTime }}) ${it.destination}" }, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AppTheme.TextPrimary, modifier = Modifier.padding(bottom = 12.dp)) }
                                 }
                             }
                         }
