@@ -95,7 +95,8 @@ data class StationComparisonRow(
     val trainNum: String, val daysFlag: String, val routeString: String, val destinationLabel: String,
     val isMcd: Boolean, val direction: Direction, val stationName: String, val telegramHeader: String,
     val afishaTime: String, val telegramTime: String, val otmenyFileStatus: String, val finalChangeText: String,
-    val isCancelledAtStation: Boolean, val isPassWithoutStop: Boolean, val isAppointedAtStation: Boolean, val isTimeShiftedAtStation: Boolean,
+    val isCancelledAtStation: Boolean, val isPassWithoutStop: Boolean, val isAppointedAtStation: Boolean, 
+    val isTimeShiftedAtStation: Boolean, // ВОЗВРАЩЕНО СВОЙСТВО
     val isPartialCancel: Boolean, val isAppointedStop: Boolean,
     val skippedStopsSummary: String, val appointedStopsSummary: String, val trackSummaryForStation: String, val hasDiscrepancyWithOtmeny: Boolean,
     val fullAfishaStations: Map<String, String>, val fullTelegramStations: Map<String, Pair<String, Boolean>>, val rawTelegramText: String,
@@ -451,8 +452,7 @@ fun loadAfishaDatabase(afishaFile: File?): Map<String, AfishaTrainInfo> {
                 val stationRows = mutableMapOf<Int, String>()
                 for (r in (headerRowIdx + 1)..sheet.lastRowNum) {
                     val cellVal = sheet.getRow(r)?.getCell(0)?.toString()?.trim() ?: ""
-                    if (cellVal.isNotEmpty() && !cellVal.contains("Условные", true) && !cellVal.contains("Расписание", true) && !cellVal.equals("изм", true) && !cellVal.equals("отм", true)) stationRows[r] = cellVal
-                }
+                    if (cellVal.isNotEmpty() && !cellVal.contains("Условные", true) && !cellVal.contains("Расписание", true) && !cellVal.equals("изм", true) && !cellVal.equals("отм", true)) stationRows[r] = cellVal                }
                 val hRow = sheet.getRow(headerRowIdx) ?: continue
                 val subRow = sheet.getRow(headerRowIdx + 1)
                 val subRowIsModifiers = subRow?.getCell(0)?.toString()?.trim().isNullOrEmpty()
@@ -702,6 +702,22 @@ fun parseManualExport(files: List<File>): Map<String, String> {
 
 // ==================== 6. СВЕРКА ====================
 
+// ВОЗВРАЩЕНА ФУНКЦИЯ buildRemainingStopsNote
+fun buildRemainingStopsNote(targetKey: String, stationTimes: LinkedHashMap<String, Pair<String, Boolean>>, isAppointed: Boolean, explicitNoStopsText: String): String {
+    if (explicitNoStopsText.isNotEmpty()) return explicitNoStopsText
+    val keys = stationTimes.keys.toList(); val idx = keys.indexOf(targetKey)
+    if (idx == -1 || idx >= keys.lastIndex) return ""
+    val afterKeys = keys.subList(idx + 1, keys.size)
+    val intermediateStops = afterKeys.dropLast(1).filter { k -> (stationTimes[k]?.second ?: false) && k !in HARD_CLOSED_STATIONS }
+    if (intermediateStops.isEmpty() && afterKeys.isNotEmpty()) {
+        val endStDisplay = displayStationName(afterKeys.last())
+        return if (isAppointed) "Следует без остановок." else "До ст. $endStDisplay проследует без остановок."
+    } else if (isAppointed && intermediateStops.size in 1..3) {
+        return "Следует с остановками: ${(intermediateStops + afterKeys.last()).map { displayStationName(it) }.joinToString(", ")}."
+    }
+    return ""
+}
+
 fun mergeSameTrainRowsForDay(rows: List<StationComparisonRow>): List<StationComparisonRow> {
     val grouped = rows.groupBy { it.trainNum to it.direction }
     val mergedList = mutableListOf<StationComparisonRow>()
@@ -802,7 +818,9 @@ private fun makeComparisonRow(targetStationDisplay: String, dirNum: String, ev: 
             Direction.FROM_MOSCOW -> when { afInfo?.routeString?.contains("Твер", true) == true -> "до Твери"; afInfo?.routeString?.contains("Клин", true) == true -> "до Клина"; afInfo?.routeString?.contains("Конаков", true) == true -> "до Конаково ГРЭС"; afInfo?.routeString?.contains("Подсолнеч", true) == true -> "до Подсолнечной"; afInfo?.routeString?.contains("Решетник", true) == true -> "до Решетниково"; else -> "до Крюково" }
         },
         isMcd = isMcd, direction = dir, stationName = targetStationDisplay, telegramHeader = telegramHeader, afishaTime = afTimeAtStation.ifEmpty { "-" }, telegramTime = telTimeAtStation.ifEmpty { if (isCanc) "ОТМ" else "-" },
-        otmenyFileStatus = otmStatus, finalChangeText = statusText.ifEmpty { otmStatus }, isCancelledAtStation = isCanc, isPassWithoutStop = isPassNoStop, isAppointedAtStation = isApp, isTimeShiftedAtStation = isShifted, isPartialCancel = isPartial, isAppointedStop = isAppStop,
+        otmenyFileStatus = otmStatus, finalChangeText = statusText.ifEmpty { otmStatus }, isCancelledAtStation = isCanc, isPassWithoutStop = isPassNoStop, isAppointedAtStation = isApp, 
+        isTimeShiftedAtStation = isShifted, // ПЕРЕДАЕТСЯ СВОЙСТВО
+        isPartialCancel = isPartial, isAppointedStop = isAppStop,
         skippedStopsSummary = ev?.skippedStops?.joinToString(", ") ?: "", appointedStopsSummary = ev?.appointedStops?.joinToString(", ") ?: "", trackSummaryForStation = trackBadge, hasDiscrepancyWithOtmeny = hasDiscrep,
         fullAfishaStations = afInfo?.stationTimes ?: emptyMap(), fullTelegramStations = ev?.stationTimes ?: emptyMap(), rawTelegramText = rawText, validationError = validationError
     )
@@ -1067,7 +1085,7 @@ fun TrainTableSection(rows: List<StationComparisonRow>, emptyMessage: String, sh
                             if (item.isMcd) { 
                                 Spacer(modifier = Modifier.width(2.dp)); 
                                 Surface(shape = RoundedCornerShape(2.dp), color = Color(0xFFFFE4E6)) { 
-                                    // ИСПРАВЛЕНИЕ: Бейдж МЦД теперь горизонтальный (maxLines = 1)
+                                    // Бейдж МЦД теперь горизонтальный (maxLines = 1)
                                     Text("МЦД", fontSize = 8.sp, fontWeight = FontWeight.Black, color = Color(0xFFBE123C), modifier = Modifier.padding(horizontal = 2.dp, vertical = 1.dp), maxLines = 1) 
                                 } 
                             } 
@@ -1158,7 +1176,6 @@ fun StationAnalyticsReportView(stationName: String, dateFilterLabel: String, toM
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // ИСПРАВЛЕНИЕ: Строгая фильтрация для таблицы
         val displayList = when (selectedCategory) {
             1 -> cancelledTrains
             2 -> appointedTrains
@@ -1473,7 +1490,6 @@ fun TrainRApp() {
                         CompactFileBadge("2. ТЕЛЕГРАММЫ (${telegramFiles.size})", if (telegramFiles.isNotEmpty()) telegramFiles.joinToString { it.nameWithoutExtension.take(8) } else "Word / PDF", telegramFiles.isNotEmpty(), TrainRTheme.RoyalBlue, Modifier.weight(1f), { val f = openFileDialog("Выберите одну или несколько телеграмм", true); if (f.isNotEmpty()) { telegramFiles = telegramFiles + f; if (currentStation.isNotEmpty()) recalculateStation(currentStation, selectedDates) } }, { telegramFiles = emptyList(); telegramEvents = emptyList(); availableDates = emptyList(); selectedDates = emptySet(); statusText = "Телеграммы очищены." })
                         CompactFileBadge("3. ФАЙЛ «ОТМЕНЫ» (${otmenyFiles.size})", if (otmenyFiles.isNotEmpty()) "Загружено: ${otmenyFiles.size}" else "TXT / DOCX", otmenyFiles.isNotEmpty(), Color(0xFF7C3AED), Modifier.weight(1f), { val f = openFileDialog("Выберите файлы выгрузки «Отмены» (.txt, .docx)", true); if (f.isNotEmpty()) { otmenyFiles = f; if (currentStation.isNotEmpty()) recalculateStation(currentStation, selectedDates) } }, { otmenyFiles = emptyList(); otmenyMap = emptyMap(); statusText = "Отмены очищены." })
                         CompactFileBadge("4. СВЕРКА (${manualFiles.size})", if (manualFiles.isNotEmpty()) "Загружено: ${manualFiles.size}" else "Своя выгрузка", manualFiles.isNotEmpty(), Color(0xFF0EA5E9), Modifier.weight(1f), { val f = openFileDialog("Выберите файл(ы) для сверки (.txt, .docx)", true); if (f.isNotEmpty()) { manualFiles = f; scope.launch { isBusy = true; manualMap = withContext(Dispatchers.IO) { parseManualExport(f) }; if (currentStation.isNotEmpty()) recalculateStation(currentStation, selectedDates) } } }, { manualFiles = emptyList(); manualMap = emptyMap(); statusText = "Сверка выгрузок очищена." })
-                        // НОВАЯ КНОПКА ДЛЯ ЯНДЕКСА
                         CompactFileBadge("5. ЯНДЕКС (.XLSX)", if (yandexFiles.isNotEmpty()) "Строк: ${yandexTrains.size}" else "Excel", yandexFiles.isNotEmpty(), TrainRTheme.YandexRed, Modifier.weight(1f), {
                             val f = openFileDialog("Выберите Excel Яндекса", false, ".xlsx")
                             if (f.isNotEmpty()) {
@@ -1617,7 +1633,6 @@ fun CalendarDatePickerDialog(
 ) {
     val currentSelection = remember { mutableStateOf(initialSelected) }
     
-    // ИСПРАВЛЕНИЕ: Полноценный календарь на 2 месяца
     val months = availableDates.groupBy { it.monthNum to it.monthName }.toList().sortedBy { it.first.first }
 
     Dialog(onDismissRequest = onDismiss) {
