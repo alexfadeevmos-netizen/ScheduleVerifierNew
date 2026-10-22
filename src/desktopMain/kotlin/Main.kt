@@ -96,7 +96,7 @@ data class StationComparisonRow(
     val isMcd: Boolean, val direction: Direction, val stationName: String, val telegramHeader: String,
     val afishaTime: String, val telegramTime: String, val otmenyFileStatus: String, val finalChangeText: String,
     val isCancelledAtStation: Boolean, val isPassWithoutStop: Boolean, val isAppointedAtStation: Boolean, 
-    val isTimeShiftedAtStation: Boolean, // Свойство на месте
+    val isTimeShiftedAtStation: Boolean,
     val isPartialCancel: Boolean, val isAppointedStop: Boolean,
     val skippedStopsSummary: String, val appointedStopsSummary: String, val trackSummaryForStation: String, val hasDiscrepancyWithOtmeny: Boolean,
     val fullAfishaStations: Map<String, String>, val fullTelegramStations: Map<String, Pair<String, Boolean>>, val rawTelegramText: String,
@@ -959,7 +959,7 @@ fun exportStationFilesToFolders(station: String, toMoscow: List<StationCompariso
     }
     if (fromMoscow.isNotEmpty()) {
         try {
-            File(dirFromMoscow, "$station от Москвы$datePart.txt").printWriter(Charsets.UTF_8).use { out ->
+            File(dirFromMoscow, "$station от Москвы$fileDatePart.txt").printWriter(Charsets.UTF_8).use { out ->
                 out.println("$station   Изменения в графике движения эл/поездов")
                 out.println("от Ленинградского вокзала, от Ипподрома")
                 fromMoscow.filter { it.validationError.isEmpty() && it.stationName !in HARD_CLOSED_STATIONS }.groupBy { it.dateGroup }.forEach { (dKey, rowsInGroup) ->
@@ -1454,7 +1454,7 @@ fun TrainRApp() {
                             matchingEv?.calendarDays?.fallbackLabel ?: "Афиша", 1, emptyList(), "", af.trainNum, af.daysFlag, 
                             af.routeString, af.destinationLabel, af.isMcd, af.direction, "Все станции", "Без изменений", 
                             af.stationTimes.values.firstOrNull() ?: "-", "-", "", "Следует расписанием Афиши", 
-                            false, false, false, false, false, false, false, // <-- Исправлено: добавлен false для isTimeShiftedAtStation
+                            false, false, false, false, false, false, false, // <-- 7 boolean args
                             "", "", "", false, af.stationTimes, emptyMap(), "", ""
                         ))
                     }
