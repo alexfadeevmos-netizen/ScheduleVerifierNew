@@ -65,6 +65,7 @@ object AppConstants {
 
 enum class Direction { TO_MOSCOW, FROM_MOSCOW }
 enum class TrainFilter { ALL, MCD, EXPRESS }
+enum class YandexDiscrepancySeverity { CRITICAL_CANCEL_MISSED, TIME_MISMATCH, STOP_MISMATCH, INFO }
 
 // ==================== 2. МОДЕЛИ ДАННЫХ ====================
 
@@ -100,6 +101,27 @@ data class StationComparisonRow(
     val validationError: String = ""
 )
 
+data class YandexParsedTrain(
+    val trainNum: String,
+    val departureTime: String,
+    val route: String,
+    val stopsRule: String,
+    val rawText: String
+)
+
+data class YandexDiscrepancyRow(
+    val trainNum: String,
+    val route: String,
+    val direction: Direction,
+    val yandexTime: String,
+    val actualExpectedTime: String,
+    val yandexStops: String,
+    val telegramStopsChange: String,
+    val basisDocument: String,
+    val discrepancyDescription: String,
+    val severity: YandexDiscrepancySeverity
+)
+
 data class GlobalError(val id: String, val trainNum: String, val header: String, val reason: String, var isIgnored: Boolean = false)
 
 private data class StationCalcResult(
@@ -127,6 +149,7 @@ object TrainRTheme {
     val TextDark = Color(0xFF0F172A)
     val TextSub = Color(0xFF334155)
     val PurpleMcd = Color(0xFF7C3AED)
+    val YandexRed = Color(0xFFE11D48)
 }
 
 val POLYGON_STATIONS = listOf(
@@ -155,6 +178,11 @@ val HARD_CLOSED_STATIONS = setOf("петровскоразумовская", "п
 val MONTH_NAMES_BY_NUM = mapOf(
     1 to "января", 2 to "февраля", 3 to "марта", 4 to "апреля", 5 to "мая", 6 to "июня",
     7 to "июля", 8 to "августа", 9 to "сентября", 10 to "октября", 11 to "ноября", 12 to "декабря"
+)
+
+val MONTH_NAMES_NOMINATIVE = mapOf(
+    1 to "Январь", 2 to "Февраль", 3 to "Март", 4 to "Апрель", 5 to "Май", 6 to "Июнь",
+    7 to "Июль", 8 to "Август", 9 to "Сентябрь", 10 to "Октябрь", 11 to "Ноябрь", 12 to "Декабрь"
 )
 
 // ==================== 4. БАЗОВЫЕ УТИЛИТЫ ====================
@@ -413,7 +441,9 @@ fun lookupOtmenyStatus(otmenyMap: Map<String, String>, directionalNum: String): 
 fun lookupAfisha(afishaDb: Map<String, AfishaTrainInfo>, directionalNum: String): AfishaTrainInfo? {
     afishaDb[directionalNum]?.let { return it }
     return afishaDb.entries.firstOrNull { (k, _) -> directionalNum in trainNumLookupKeys(k) }?.value
-}// ==================== 5. ПАРСЕР БАЗОВОЙ АФИШИ ====================
+}
+
+// ==================== 5. ПАРСЕР БАЗОВОЙ АФИШИ ====================
 
 fun loadAfishaDatabase(afishaFile: File?): Map<String, AfishaTrainInfo> {
     if (afishaFile == null || !afishaFile.exists()) return emptyMap()
@@ -672,9 +702,7 @@ fun buildRemainingStopsNote(targetKey: String, stationTimes: LinkedHashMap<Strin
         return "Следует с остановками: ${(intermediateStops + afterKeys.last()).map { displayStationName(it) }.joinToString(", ")}."
     }
     return ""
-}
-
-// ==================== 7. ЯДРО СВЕРКИ И ГРУППИРОВКИ ====================
+}// ==================== 7. ЯДРО СВЕРКИ И ГРУППИРОВКИ ====================
 
 fun mergeSameTrainRowsForDay(rows: List<StationComparisonRow>): List<StationComparisonRow> {
     val grouped = rows.groupBy { it.trainNum to it.direction }
@@ -904,7 +932,7 @@ fun buildStationComparison(targetStationDisplay: String, afishaDb: Map<String, A
     return Pair(expandAndGroupChronologically(toMoscowRaw, selectedDates), expandAndGroupChronologically(fromMoscowRaw, selectedDates))
 }
 
-// ==================== 8. ЭКСПОРТ РЕЗУЛЬТАТОВ ====================
+// ==================== 8. ЭКСПОРТ РЕЗУЛЬТАТОВ И АУДИТ ЯНДЕКСА ====================
 
 fun exportStationFilesToFolders(station: String, toMoscow: List<StationComparisonRow>, fromMoscow: List<StationComparisonRow>, dateFilterSuffix: String = "") {
     val desktop = File(System.getProperty("user.home"), "Desktop")
@@ -1562,7 +1590,7 @@ fun TrainRApp() {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     TabRow(selectedTabIndex = activeTab, containerColor = TrainRTheme.CardBg, contentColor = TrainRTheme.RoyalBlue, modifier = Modifier.width(740.dp).height(36.dp).clip(RoundedCornerShape(8.dp))) {
                         Tab(selected = activeTab == 0, onClick = { activeTab = 0 }, text = { Text("НА МОСКВУ / ИППОДРОМ (${toMoscowList.size})", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, maxLines = 1) })
-                        Tab(selected = activeTab == 1, onClick = { activeTab = 1 }, text = { Text("НА ОБЛАСТЬ (ИЗ ИППОДРОМА) (${fromMoscowList.size})", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, maxLines = 1) })
+                        Tab(selected = activeTab == 1, onClick = { activeTab = 1 }, text = { Text("НА ОБЛАСТЬ / ИППОДРОМ (${fromMoscowList.size})", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, maxLines = 1) })
                         Tab(selected = activeTab == 2, onClick = { activeTab = 2 }, text = { Text("ОТЧЕТ", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.GreenSuccess, maxLines = 1) })
                         Tab(selected = activeTab == 3, onClick = { activeTab = 3 }, text = { Text("ПОИСК (${globalSearchResults.size})", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.GoldAccent, maxLines = 1) })
                         Tab(selected = activeTab == 4, onClick = { activeTab = 4 }, text = { Text("ОШИБКИ (${globalErrors.count { !it.isIgnored }})", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.RedCancel, maxLines = 1) })
