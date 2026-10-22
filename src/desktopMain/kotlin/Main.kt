@@ -1451,11 +1451,37 @@ fun TrainRApp() {
                     val matchingEv = tels.firstOrNull { numMatches(it.trainNum) }
                     afishaDb.values.filter { numMatches(it.trainNum) }.forEach { af ->
                         results.add(StationComparisonRow(
-                            matchingEv?.calendarDays?.fallbackLabel ?: "Афиша", 1, emptyList(), "", af.trainNum, af.daysFlag, 
-                            af.routeString, af.destinationLabel, af.isMcd, af.direction, "Все станции", "Без изменений", 
-                            af.stationTimes.values.firstOrNull() ?: "-", "-", "", "Следует расписанием Афиши", 
-                            false, false, false, false, false, false, false, // <-- 7 boolean args
-                            "", "", "", false, af.stationTimes, emptyMap(), "", ""
+                            matchingEv?.calendarDays?.fallbackLabel ?: "Афиша",
+                            1,
+                            emptyList(),
+                            "",
+                            af.trainNum,
+                            af.daysFlag,
+                            af.routeString,
+                            af.destinationLabel,
+                            af.isMcd,
+                            af.direction,
+                            "Все станции",
+                            "Без изменений",
+                            af.stationTimes.values.firstOrNull() ?: "-",
+                            "-",
+                            "",
+                            "Следует расписанием Афиши",
+                            false,
+                            false,
+                            false,
+                            false,
+                            false,
+                            false,
+                            false,
+                            "",
+                            "",
+                            "",
+                            false,
+                            af.stationTimes,
+                            emptyMap(),
+                            "",
+                            ""
                         ))
                     }
                 }
