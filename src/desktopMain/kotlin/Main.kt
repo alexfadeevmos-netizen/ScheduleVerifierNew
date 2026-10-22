@@ -96,7 +96,7 @@ data class StationComparisonRow(
     val isMcd: Boolean, val direction: Direction, val stationName: String, val telegramHeader: String,
     val afishaTime: String, val telegramTime: String, val otmenyFileStatus: String, val finalChangeText: String,
     val isCancelledAtStation: Boolean, val isPassWithoutStop: Boolean, val isAppointedAtStation: Boolean, 
-    val isTimeShiftedAtStation: Boolean, // ВОЗВРАЩЕНО СВОЙСТВО
+    val isTimeShiftedAtStation: Boolean, // Свойство на месте
     val isPartialCancel: Boolean, val isAppointedStop: Boolean,
     val skippedStopsSummary: String, val appointedStopsSummary: String, val trackSummaryForStation: String, val hasDiscrepancyWithOtmeny: Boolean,
     val fullAfishaStations: Map<String, String>, val fullTelegramStations: Map<String, Pair<String, Boolean>>, val rawTelegramText: String,
@@ -702,7 +702,6 @@ fun parseManualExport(files: List<File>): Map<String, String> {
 
 // ==================== 6. СВЕРКА ====================
 
-// ВОЗВРАЩЕНА ФУНКЦИЯ buildRemainingStopsNote
 fun buildRemainingStopsNote(targetKey: String, stationTimes: LinkedHashMap<String, Pair<String, Boolean>>, isAppointed: Boolean, explicitNoStopsText: String): String {
     if (explicitNoStopsText.isNotEmpty()) return explicitNoStopsText
     val keys = stationTimes.keys.toList(); val idx = keys.indexOf(targetKey)
@@ -819,7 +818,7 @@ private fun makeComparisonRow(targetStationDisplay: String, dirNum: String, ev: 
         },
         isMcd = isMcd, direction = dir, stationName = targetStationDisplay, telegramHeader = telegramHeader, afishaTime = afTimeAtStation.ifEmpty { "-" }, telegramTime = telTimeAtStation.ifEmpty { if (isCanc) "ОТМ" else "-" },
         otmenyFileStatus = otmStatus, finalChangeText = statusText.ifEmpty { otmStatus }, isCancelledAtStation = isCanc, isPassWithoutStop = isPassNoStop, isAppointedAtStation = isApp, 
-        isTimeShiftedAtStation = isShifted, // ПЕРЕДАЕТСЯ СВОЙСТВО
+        isTimeShiftedAtStation = isShifted, 
         isPartialCancel = isPartial, isAppointedStop = isAppStop,
         skippedStopsSummary = ev?.skippedStops?.joinToString(", ") ?: "", appointedStopsSummary = ev?.appointedStops?.joinToString(", ") ?: "", trackSummaryForStation = trackBadge, hasDiscrepancyWithOtmeny = hasDiscrep,
         fullAfishaStations = afInfo?.stationTimes ?: emptyMap(), fullTelegramStations = ev?.stationTimes ?: emptyMap(), rawTelegramText = rawText, validationError = validationError
@@ -960,7 +959,7 @@ fun exportStationFilesToFolders(station: String, toMoscow: List<StationCompariso
     }
     if (fromMoscow.isNotEmpty()) {
         try {
-            File(dirFromMoscow, "$station от Москвы$fileDatePart.txt").printWriter(Charsets.UTF_8).use { out ->
+            File(dirFromMoscow, "$station от Москвы$datePart.txt").printWriter(Charsets.UTF_8).use { out ->
                 out.println("$station   Изменения в графике движения эл/поездов")
                 out.println("от Ленинградского вокзала, от Ипподрома")
                 fromMoscow.filter { it.validationError.isEmpty() && it.stationName !in HARD_CLOSED_STATIONS }.groupBy { it.dateGroup }.forEach { (dKey, rowsInGroup) ->
@@ -1085,7 +1084,6 @@ fun TrainTableSection(rows: List<StationComparisonRow>, emptyMessage: String, sh
                             if (item.isMcd) { 
                                 Spacer(modifier = Modifier.width(2.dp)); 
                                 Surface(shape = RoundedCornerShape(2.dp), color = Color(0xFFFFE4E6)) { 
-                                    // Бейдж МЦД теперь горизонтальный (maxLines = 1)
                                     Text("МЦД", fontSize = 8.sp, fontWeight = FontWeight.Black, color = Color(0xFFBE123C), modifier = Modifier.padding(horizontal = 2.dp, vertical = 1.dp), maxLines = 1) 
                                 } 
                             } 
@@ -1456,7 +1454,8 @@ fun TrainRApp() {
                             matchingEv?.calendarDays?.fallbackLabel ?: "Афиша", 1, emptyList(), "", af.trainNum, af.daysFlag, 
                             af.routeString, af.destinationLabel, af.isMcd, af.direction, "Все станции", "Без изменений", 
                             af.stationTimes.values.firstOrNull() ?: "-", "-", "", "Следует расписанием Афиши", 
-                            false, false, false, false, false, false, "", "", "", false, af.stationTimes, emptyMap(), "", ""
+                            false, false, false, false, false, false, false, // <-- Исправлено: добавлен false для isTimeShiftedAtStation
+                            "", "", "", false, af.stationTimes, emptyMap(), "", ""
                         ))
                     }
                 }
