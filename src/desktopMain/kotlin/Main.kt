@@ -925,8 +925,14 @@ fun buildYandexDiscrepancies(yandexTrains: List<YandexParsedTrain>, telegramEven
                 continue
             }
 
-            if (afishaTime.isNotEmpty() && afishaTime != yandexTime && ev?.isTimeShiftedAtStation == true) {
-                result.add(YandexDiscrepancyRow(dirNum, y.route, dir, yandexTime, afishaTime, y.stopsRule, "Время изменено", ev.telegramHeader, "Время в Яндексе не совпадает с Афишей", YandexDiscrepancySeverity.TIME_MISMATCH))
+            if (ev != null && afishaTime.isNotEmpty() && afishaTime != yandexTime) {
+                val firstStationKey = afisha?.stationTimes?.keys?.firstOrNull()
+                val telegramTime = firstStationKey?.let { ev.stationTimes[it]?.first }
+                val isShiftedInTelegram = telegramTime != null && telegramTime != afishaTime
+                
+                if (isShiftedInTelegram) {
+                    result.add(YandexDiscrepancyRow(dirNum, y.route, dir, yandexTime, afishaTime, y.stopsRule, "Время изменено", ev.telegramHeader, "Время в Яндексе не совпадает с Афишей", YandexDiscrepancySeverity.TIME_MISMATCH))
+                }
             }
         }
     }
