@@ -59,6 +59,7 @@ object AppConstants {
     const val DEFAULT_STATION_ORDER = 27
     const val TRACK_HINT_LOOKAHEAD = 45
     const val REPARSE_DEBOUNCE_MS = 150L
+    const val SEARCH_DEBOUNCE_MS = 350L
 }
 
 enum class Direction { TO_MOSCOW, FROM_MOSCOW }
@@ -227,7 +228,8 @@ fun getDirectionBySingleNumber(singleNum: String): Direction {
 }
 
 fun isTrainMcd(num: String): Boolean {
-    if (!num.contains("/")) return false // МЦД ВСЕГДА ИМЕЮТ ЗНАК / И ДВА НОМЕРА
+    // МЦД ВСЕГДА ИМЕЮТ ЗНАК / И ДВА НОМЕРА
+    if (!num.contains("/")) return false 
     val base = num.split("/").first().filter { it.isDigit() }
     return base.startsWith("72") || base.startsWith("73") || base.startsWith("74") || base.startsWith("67")
 }
@@ -719,6 +721,7 @@ fun mergeSameTrainRowsForDay(rows: List<StationComparisonRow>): List<StationComp
         }
 
         val finalString = combinedChangeTextBuilder.toString().ifEmpty { baseRow.finalChangeText }
+
         mergedList.add(baseRow.copy(finalChangeText = finalString, skippedStopsSummary = allSkipped.joinToString(", "), appointedStopsSummary = allAppointed.joinToString(", "), rawTelegramText = rowList.map { it.rawTelegramText }.distinct().joinToString("\n---\n")))
     }
     return mergedList
@@ -1048,12 +1051,12 @@ fun TrainTableSection(rows: List<StationComparisonRow>, emptyMessage: String, sh
         Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFFE2E8F0)).padding(vertical = 6.dp, horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("ДАТЫ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(110.dp))
             if (showStationColumn) Text("СТАНЦИЯ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(95.dp))
-            Text("№ ПОЕЗДА", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(90.dp))
-            Text("МАРШРУТ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(135.dp))
-            Text("ОСНОВАНИЕ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(115.dp))
-            Text("ЯНДЕКС", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(55.dp))
-            Text("АФИША", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(55.dp))
-            Text("ТЕЛЕГР.", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(55.dp))
+            Text("№ ПОЕЗДА", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(110.dp)) // Расширено
+            Text("МАРШРУТ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(180.dp)) // Расширено
+            Text("ОСНОВАНИЕ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(130.dp)) // Расширено
+            Text("ЯНДЕКС", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(60.dp))
+            Text("АФИША", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(60.dp))
+            Text("ТЕЛЕГР.", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(60.dp))
             Text("ИЗМЕНЕНИЯ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.weight(1f))
         }
         Spacer(modifier = Modifier.height(2.dp))
@@ -1066,20 +1069,26 @@ fun TrainTableSection(rows: List<StationComparisonRow>, emptyMessage: String, sh
                     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp).clip(RoundedCornerShape(4.dp)).background(bg).border(1.dp, borderCol, RoundedCornerShape(4.dp)).clickable { onRowClick(item) }.padding(vertical = 4.dp, horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(item.dateGroup, fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.RoyalBlue, modifier = Modifier.width(110.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (showStationColumn) Text(item.stationName, fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(95.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Row(modifier = Modifier.width(90.dp), verticalAlignment = Alignment.CenterVertically) { 
+                        
+                        Row(modifier = Modifier.width(110.dp), verticalAlignment = Alignment.CenterVertically) { 
                             Text("№${item.trainNum}", fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = TrainRTheme.NavyDark, maxLines = 1)
                             if (item.isMcd) { 
-                                Spacer(modifier = Modifier.width(2.dp)); 
-                                Surface(shape = RoundedCornerShape(2.dp), color = Color(0xFFFFE4E6)) { 
-                                    Text("МЦД", fontSize = 8.sp, fontWeight = FontWeight.Black, color = Color(0xFFBE123C), modifier = Modifier.padding(horizontal = 2.dp, vertical = 1.dp), maxLines = 1) 
+                                Spacer(modifier = Modifier.width(4.dp)); 
+                                Surface(shape = RoundedCornerShape(4.dp), color = Color(0xFFFFE4E6)) { 
+                                    Text("МЦД", fontSize = 9.sp, fontWeight = FontWeight.Black, color = Color(0xFFBE123C), modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) 
                                 } 
                             } 
                         }
-                        Column(modifier = Modifier.width(135.dp)) { Text(item.routeString, fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.NavyDark, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(item.destinationLabel, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = TrainRTheme.RoyalBlue, maxLines = 1) }
-                        Text(item.telegramHeader, fontWeight = FontWeight.Bold, fontSize = 9.sp, color = TrainRTheme.TextSub, modifier = Modifier.width(115.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(item.yandexTime, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 12.sp, color = TrainRTheme.YandexRed, modifier = Modifier.width(55.dp))
-                        Text(item.afishaTime, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = TrainRTheme.TextSub, modifier = Modifier.width(55.dp))
-                        Text(item.telegramTime, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 12.sp, color = if (item.isCancelledAtStation) TrainRTheme.RedCancel else TrainRTheme.RoyalBlue, modifier = Modifier.width(55.dp))
+                        
+                        Column(modifier = Modifier.width(180.dp).padding(end = 4.dp)) { 
+                            Text(item.routeString, fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.NavyDark, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(item.destinationLabel, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = TrainRTheme.RoyalBlue, maxLines = 1) 
+                        }
+                        
+                        Text(item.telegramHeader, fontWeight = FontWeight.Bold, fontSize = 9.sp, color = TrainRTheme.TextSub, modifier = Modifier.width(130.dp).padding(end = 4.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(item.yandexTime, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 12.sp, color = TrainRTheme.YandexRed, modifier = Modifier.width(60.dp))
+                        Text(item.afishaTime, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = TrainRTheme.TextSub, modifier = Modifier.width(60.dp))
+                        Text(item.telegramTime, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 12.sp, color = if (item.isCancelledAtStation) TrainRTheme.RedCancel else TrainRTheme.RoyalBlue, modifier = Modifier.width(60.dp))
                         Text(item.finalChangeText, fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = when { item.validationError.isNotEmpty() -> TrainRTheme.RedCancel; item.isCancelledAtStation -> TrainRTheme.RedCancel; item.isAppointedAtStation || item.isAppointedStop -> TrainRTheme.GreenSuccess; else -> TrainRTheme.TextDark }, modifier = Modifier.weight(1f).padding(end = 4.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                 }
@@ -1162,7 +1171,10 @@ fun StationAnalyticsReportView(stationName: String, dateFilterLabel: String, toM
         Spacer(modifier = Modifier.height(4.dp))
 
         val displayList = when (selectedCategory) {
-            1 -> cancelledTrains; 2 -> appointedTrains; 3 -> shifted; 4 -> discrepancies
+            1 -> cancelledTrains
+            2 -> appointedTrains
+            3 -> shifted
+            4 -> discrepancies
             else -> cancelledTrains + appointedTrains + shifted + discrepancies
         }
 
@@ -1188,13 +1200,16 @@ fun StationAnalyticsReportView(stationName: String, dateFilterLabel: String, toM
 
 @Composable
 fun TrainDossierDialog(row: StationComparisonRow, onDismiss: () -> Unit) {
+    val leftPanelScrollState = rememberScrollState()
     val rawTextScrollState = rememberScrollState()
     var selectedStationInDossier by remember { mutableStateOf<String?>(row.stationName) }
 
     Dialog(onDismissRequest = onDismiss) {
-        Card(modifier = Modifier.width(960.dp).heightIn(min = 600.dp, max = 800.dp), shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(8.dp)) {
+        // Увеличена ширина до 1150.dp, чтобы станции гарантированно помещались в строку
+        Card(modifier = Modifier.width(1150.dp).heightIn(min = 600.dp, max = 800.dp), shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(8.dp)) {
             Row(modifier = Modifier.fillMaxSize()) {
-                Column(modifier = Modifier.weight(1f).padding(16.dp)) {
+                // Левая панель (Основная)
+                Column(modifier = Modifier.weight(1f).padding(16.dp).verticalScroll(leftPanelScrollState)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1226,21 +1241,25 @@ fun TrainDossierDialog(row: StationComparisonRow, onDismiss: () -> Unit) {
                         if (row.skippedStopsSummary.isNotEmpty()) Text("Отменены остановки: ${row.skippedStopsSummary}", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TrainRTheme.RedCancel)
                         if (row.appointedStopsSummary.isNotEmpty()) Text("Назначены остановки: ${row.appointedStopsSummary}", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TrainRTheme.GreenSuccess)
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     
-                    Text("Расписание по станциям следования (нажмите на станцию для справки):", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = TrainRTheme.NavyDark)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).background(Color(0xFFE2E8F0)).padding(vertical = 6.dp, horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("СТАНЦИЯ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(160.dp))
-                        Text("ЯНДЕКС", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(60.dp))
-                        Text("ПО АФИШЕ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(80.dp))
-                        Text("ПО ТЕЛЕГРАММЕ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(110.dp))
+                    Text("Расписание по станциям следования (нажмите на станцию для справки):", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = TrainRTheme.NavyDark)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    
+                    // Шапка таблицы станций
+                    Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).background(Color(0xFFE2E8F0)).padding(vertical = 8.dp, horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("СТАНЦИЯ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(180.dp))
+                        Text("ЯНДЕКС", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(70.dp))
+                        Text("ПО АФИШЕ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(90.dp))
+                        Text("ПО ТЕЛЕГРАММЕ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(120.dp))
                         Text("РАЗНИЦА / СТАТУС СТАНЦИИ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.weight(1f))
                     }
                     
                     val allStKeys = (row.fullAfishaStations.keys + row.fullTelegramStations.keys).distinct()
-                    LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFFF8FAFC)).border(BorderStroke(1.dp, TrainRTheme.BorderCol), RoundedCornerShape(6.dp))) {
-                        items(allStKeys) { stKey ->
+                    
+                    // Заменяем LazyColumn на обычный forEach внутри Scrollable-колонки, чтобы избежать бага схлопывания высоты
+                    Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFFF8FAFC)).border(BorderStroke(1.dp, TrainRTheme.BorderCol), RoundedCornerShape(6.dp))) {
+                        allStKeys.forEach { stKey ->
                             val dispName = displayStationName(stKey)
                             val isCurrentViewSt = (stKey == normalizeStationKey(row.stationName))
                             val isSelectedInModal = (dispName == selectedStationInDossier)
@@ -1256,14 +1275,14 @@ fun TrainDossierDialog(row: StationComparisonRow, onDismiss: () -> Unit) {
                                 else -> "По графику"
                             }
                             val rowBg = when { isSelectedInModal -> TrainRTheme.GoldAccent.copy(alpha = 0.15f); isCurrentViewSt -> TrainRTheme.RoyalBlue.copy(alpha = 0.08f); else -> Color.Transparent }
-                            Row(modifier = Modifier.fillMaxWidth().background(rowBg).clickable { selectedStationInDossier = dispName }.padding(vertical = 6.dp, horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Row(modifier = Modifier.width(160.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(modifier = Modifier.fillMaxWidth().background(rowBg).clickable { selectedStationInDossier = dispName }.padding(vertical = 8.dp, horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Row(modifier = Modifier.width(180.dp), verticalAlignment = Alignment.CenterVertically) {
                                     if (isCurrentViewSt) { Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(TrainRTheme.RoyalBlue)); Spacer(modifier = Modifier.width(4.dp)) }
                                     Text(dispName, fontWeight = if (isCurrentViewSt || isSelectedInModal) FontWeight.Black else FontWeight.Bold, fontSize = 12.sp, color = TrainRTheme.NavyDark, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
-                                Text(yT, fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.Black, color = TrainRTheme.YandexRed, modifier = Modifier.width(60.dp))
-                                Text(afT, fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(80.dp))
-                                Text(text = telT, fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = if (telT != "-" && telT != afT) TrainRTheme.RoyalBlue else TrainRTheme.TextSub, modifier = Modifier.width(110.dp))
+                                Text(yT, fontFamily = FontFamily.Monospace, fontSize = 13.sp, fontWeight = FontWeight.Black, color = TrainRTheme.YandexRed, modifier = Modifier.width(70.dp))
+                                Text(afT, fontFamily = FontFamily.Monospace, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(90.dp))
+                                Text(text = telT, fontFamily = FontFamily.Monospace, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = if (telT != "-" && telT != afT) TrainRTheme.RoyalBlue else TrainRTheme.TextSub, modifier = Modifier.width(120.dp))
                                 Surface(shape = RoundedCornerShape(4.dp), color = when { statusBadge.contains("Отмена") || statusBadge.contains("Без ост") -> TrainRTheme.RedCancel.copy(alpha = 0.12f); diffLabel.isNotEmpty() -> TrainRTheme.GoldAccent.copy(alpha = 0.12f); else -> Color(0xFFE2E8F0) }) {
                                     Text(text = statusBadge, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = when { statusBadge.contains("Отмена") || statusBadge.contains("Без ост") -> TrainRTheme.RedCancel; diffLabel.isNotEmpty() -> TrainRTheme.GoldAccent; else -> TrainRTheme.TextSub }, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                                 }
@@ -1273,9 +1292,9 @@ fun TrainDossierDialog(row: StationComparisonRow, onDismiss: () -> Unit) {
                     }
                     
                     if (selectedStationInDossier != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                         Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = Color(0xFFEFF6FF), border = BorderStroke(1.dp, Color(0xFFBFDBFE))) {
-                            Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Info, null, tint = TrainRTheme.RoyalBlue, modifier = Modifier.size(15.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
@@ -1299,25 +1318,34 @@ fun TrainDossierDialog(row: StationComparisonRow, onDismiss: () -> Unit) {
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Полный исходный текст по данному поезду из телеграммы:", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(modifier = Modifier.fillMaxWidth().height(100.dp), shape = RoundedCornerShape(6.dp), color = Color(0xFFF1F5F9), border = BorderStroke(1.dp, TrainRTheme.BorderCol)) {
+                        Box(modifier = Modifier.fillMaxSize().padding(8.dp).verticalScroll(rawTextScrollState)) {
+                            Text(row.rawTelegramText, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold, color = TrainRTheme.NavyDark)
+                        }
+                    }
                 }
                 
-                // Боковая панель Яндекса (Уменьшена до 160.dp)
-                Surface(modifier = Modifier.width(160.dp).fillMaxHeight(), color = Color(0xFFFFF1F2), border = BorderStroke(1.dp, TrainRTheme.YandexRed.copy(alpha = 0.3f))) {
+                // Боковая панель Яндекса (Еще более сужена - до 130.dp, чтобы не мешать)
+                Surface(modifier = Modifier.width(130.dp).fillMaxHeight(), color = Color(0xFFFFF1F2), border = BorderStroke(1.dp, TrainRTheme.YandexRed.copy(alpha = 0.3f))) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Info, null, tint = TrainRTheme.YandexRed, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("ИНФО ЯНДЕКС", fontSize = 14.sp, fontWeight = FontWeight.Black, color = TrainRTheme.YandexRed)
+                            Text("ЯНДЕКС", fontSize = 13.sp, fontWeight = FontWeight.Black, color = TrainRTheme.YandexRed)
                         }
                         Divider(modifier = Modifier.padding(vertical = 8.dp), color = TrainRTheme.YandexRed.copy(alpha = 0.2f))
                         if (row.yandexTime == "-") {
-                            Text("Поезд отсутствует в загруженной выгрузке Яндекса.", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TrainRTheme.RedCancel)
+                            Text("Поезд отсутствует в загруженной выгрузке Яндекса.", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TrainRTheme.RedCancel)
                         } else {
                             Text("Время отправления:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TrainRTheme.NavyDark)
                             Text(row.yandexTime, fontFamily = FontFamily.Monospace, fontSize = 18.sp, fontWeight = FontWeight.Black, color = TrainRTheme.YandexRed)
                             Spacer(modifier = Modifier.height(12.dp))
                             Text("Основание маршрута в Яндексе:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TrainRTheme.NavyDark)
-                            Text(row.yandexInfo, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TrainRTheme.TextSub)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(row.yandexInfo, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TrainRTheme.TextSub)
                         }
                     }
                 }
