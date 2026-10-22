@@ -659,32 +659,6 @@ object TelegramParseCache {
     }
 }
 
-private data class OtmenyCacheKey(val paths: List<String>, val lastModified: Long)
-object OtmenyParseCache {
-    private var key: OtmenyCacheKey? = null; private var cached: Map<String, String> = emptyMap()
-    fun get(files: List<File>): Map<String, String> {
-        if (files.isEmpty()) { key = null; cached = emptyMap(); return emptyMap() }
-        val newKey = OtmenyCacheKey(files.map { it.absolutePath }, files.sumOf { it.lastModified() })
-        if (newKey == key) return cached
-        cached = parseOtmenyFiles(files); key = newKey; return cached
-    }
-}
-
-fun parseOtmenyFiles(files: List<File>): Map<String, String> {
-    val map = mutableMapOf<String, String>()
-    files.forEach { f ->
-        readDocumentText(f).lines().map { preprocessTelegramLine(it) }.forEach { line ->
-            val m = Regex("№\\s*(\\d{4}(?:/\\d{4})?)\\s+(.*?-\\s*.*)").find(line)
-            if (m != null) map[m.groupValues[1]] = m.groupValues[2].trim()
-            else {
-                val appM = Regex("(?i)Назначается\\s+№\\s*(\\d{4}(?:/\\d{4})?)\\s+(.*)").find(line)
-                if (appM != null) map[appM.groupValues[1]] = "Назначается ${appM.groupValues[2].trim()}"
-            }
-        }
-    }
-    return map
-}
-
 fun parseManualExport(files: List<File>): Map<String, String> {
     val map = mutableMapOf<String, String>()
     files.forEach { f ->
@@ -933,7 +907,7 @@ fun buildYandexDiscrepancies(yandexTrains: List<YandexParsedTrain>, telegramEven
             val telTime = ev?.stationTimes?.values?.firstOrNull()?.first ?: "-"
 
             if (ev?.isCancelledFull == true) {
-                result.add(YandexDiscrepancyRow(dirNum, y.route, dir, yandexTime, afishaTime, "ОТМЕНЕН", y.stopsRule, "Полная отмена", "Телеграмма vs Яндекс", ev.telegramHeader, "Поезд отменён телеграммой, но присутствует в выгрузке Яндекса", YandexDiscrepancySeverity.CRITICAL_CANCEL_MISSED))
+                result.add(YandexDiscrepancyRow(dirNum, y.route, dir, yandexTime, afishaTime, "ОТМЕНЕН", y.stopsRule, "Телеграмма vs Яндекс", ev.telegramHeader, "Поезд отменён телеграммой, но присутствует в выгрузке Яндекса", YandexDiscrepancySeverity.CRITICAL_CANCEL_MISSED))
                 continue
             }
 
@@ -941,10 +915,10 @@ fun buildYandexDiscrepancies(yandexTrains: List<YandexParsedTrain>, telegramEven
                 val firstStationKey = afisha?.stationTimes?.keys?.firstOrNull() ?: ev.stationTimes.keys.firstOrNull()
                 val telegramTimeActual = firstStationKey?.let { ev.stationTimes[it]?.first } ?: telTime
                 if (telegramTimeActual != null && telegramTimeActual != yandexTime && telegramTimeActual != "-") {
-                    result.add(YandexDiscrepancyRow(dirNum, y.route, dir, yandexTime, afishaTime, telegramTimeActual, y.stopsRule, "Время изменено телеграммой", "Телеграмма vs Яндекс", ev.telegramHeader, "Время в Яндексе ($yandexTime) не совпадает с актуальным временем по Телеграмме ($telegramTimeActual)", YandexDiscrepancySeverity.TIME_MISMATCH))
+                    result.add(YandexDiscrepancyRow(dirNum, y.route, dir, yandexTime, afishaTime, telegramTimeActual, y.stopsRule, "Телеграмма vs Яндекс", ev.telegramHeader, "Время в Яндексе ($yandexTime) не совпадает с актуальным временем по Телеграмме ($telegramTimeActual)", YandexDiscrepancySeverity.TIME_MISMATCH))
                 }
             } else if (afishaTime != "-" && afishaTime != yandexTime) {
-                result.add(YandexDiscrepancyRow(dirNum, y.route, dir, yandexTime, afishaTime, "-", y.stopsRule, "Без изменений (по графику)", "Афиша vs Яндекс", "Базовая Афиша", "Время в Яндексе ($yandexTime) не совпадает с графиком Афиши ($afishaTime) при отсутствии телеграмм", YandexDiscrepancySeverity.TIME_MISMATCH))
+                result.add(YandexDiscrepancyRow(dirNum, y.route, dir, yandexTime, afishaTime, "-", y.stopsRule, "Афиша vs Яндекс", "Базовая Афиша", "Время в Яндексе ($yandexTime) не совпадает с графиком Афиши ($afishaTime) при отсутствии телеграмм", YandexDiscrepancySeverity.TIME_MISMATCH))
             }
         }
     }
@@ -957,7 +931,7 @@ fun buildYandexDiscrepancies(yandexTrains: List<YandexParsedTrain>, telegramEven
                     val afisha = lookupAfisha(afishaDb, dirNum)
                     val dir = afisha?.direction ?: getDirectionBySingleNumber(dirNum)
                     val expectedTime = ev.stationTimes.values.firstOrNull()?.first ?: "-"
-                    result.add(YandexDiscrepancyRow(dirNum, ev.routeFromTelegram.ifEmpty { "Назначенный поезд" }, dir, "ОТСУТСТВУЕТ", "-", expectedTime, "", "Назначен телеграммой", "Телеграмма vs Яндекс", ev.telegramHeader, "Поезд назначен телеграммой, но отсутствует в выгрузке Яндекса", YandexDiscrepancySeverity.CRITICAL_CANCEL_MISSED))
+                    result.add(YandexDiscrepancyRow(dirNum, ev.routeFromTelegram.ifEmpty { "Назначенный поезд" }, dir, "ОТСУТСТВУЕТ", "-", expectedTime, "", "Телеграмма vs Яндекс", ev.telegramHeader, "Поезд назначен телеграммой, но отсутствует в выгрузке Яндекса", YandexDiscrepancySeverity.CRITICAL_CANCEL_MISSED))
                 }
             }
         }
@@ -1096,12 +1070,11 @@ fun TrainTableSection(rows: List<StationComparisonRow>, emptyMessage: String, sh
             if (showStationColumn) Text("СТАНЦИЯ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(95.dp))
             Text("№ ПОЕЗДА", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(90.dp))
             Text("МАРШРУТ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(135.dp))
-            Text("ТЕЛЕГРАММА", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(115.dp))
+            Text("ОСНОВАНИЕ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(115.dp))
             Text("ЯНДЕКС", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(55.dp))
             Text("АФИША", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(55.dp))
             Text("ТЕЛЕГР.", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(55.dp))
             Text("ИЗМЕНЕНИЯ", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.weight(1f))
-            Text("ИНФО ЯНДЕКС", fontWeight = FontWeight.Black, fontSize = 11.sp, color = TrainRTheme.NavyDark, modifier = Modifier.width(140.dp))
         }
         Spacer(modifier = Modifier.height(2.dp))
         if (rows.isEmpty()) { Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(emptyMessage, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TrainRTheme.TextSub) } }
@@ -1123,12 +1096,11 @@ fun TrainTableSection(rows: List<StationComparisonRow>, emptyMessage: String, sh
                             } 
                         }
                         Column(modifier = Modifier.width(135.dp)) { Text(item.routeString, fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = TrainRTheme.NavyDark, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(item.destinationLabel, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = TrainRTheme.RoyalBlue, maxLines = 1) }
-                        Text(item.telegramHeader, fontWeight = FontWeight.Bold, fontSize = 10.sp, color = TrainRTheme.TextSub, modifier = Modifier.width(115.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(item.telegramHeader, fontWeight = FontWeight.Bold, fontSize = 9.sp, color = TrainRTheme.TextSub, modifier = Modifier.width(115.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(item.yandexTime, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 12.sp, color = TrainRTheme.YandexRed, modifier = Modifier.width(55.dp))
                         Text(item.afishaTime, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = TrainRTheme.TextSub, modifier = Modifier.width(55.dp))
                         Text(item.telegramTime, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 12.sp, color = if (item.isCancelledAtStation) TrainRTheme.RedCancel else TrainRTheme.RoyalBlue, modifier = Modifier.width(55.dp))
                         Text(item.finalChangeText, fontWeight = FontWeight.ExtraBold, fontSize = 11.sp, color = when { item.validationError.isNotEmpty() -> TrainRTheme.RedCancel; item.isCancelledAtStation -> TrainRTheme.RedCancel; item.isAppointedAtStation || item.isAppointedStop -> TrainRTheme.GreenSuccess; else -> TrainRTheme.TextDark }, modifier = Modifier.weight(1f).padding(end = 4.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(item.yandexInfo.ifEmpty { "—" }, fontWeight = FontWeight.Bold, fontSize = 9.sp, color = TrainRTheme.TextSub, modifier = Modifier.width(140.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -1243,7 +1215,7 @@ fun TrainDossierDialog(row: StationComparisonRow, onDismiss: () -> Unit) {
     var selectedStationInDossier by remember { mutableStateOf<String?>(row.stationName) }
 
     Dialog(onDismissRequest = onDismiss) {
-        Card(modifier = Modifier.width(860.dp).heightIn(min = 520.dp, max = 740.dp), shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(8.dp)) {
+        Card(modifier = Modifier.width(900.dp).heightIn(min = 520.dp, max = 740.dp), shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(8.dp)) {
             Row(modifier = Modifier.fillMaxSize()) {
                 Column(modifier = Modifier.weight(1f).padding(16.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -1356,7 +1328,7 @@ fun TrainDossierDialog(row: StationComparisonRow, onDismiss: () -> Unit) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Info, null, tint = TrainRTheme.YandexRed, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("ЯНДЕКС", fontSize = 14.sp, fontWeight = FontWeight.Black, color = TrainRTheme.YandexRed)
+                            Text("ИНФО ЯНДЕКС", fontSize = 14.sp, fontWeight = FontWeight.Black, color = TrainRTheme.YandexRed)
                         }
                         Divider(modifier = Modifier.padding(vertical = 8.dp), color = TrainRTheme.YandexRed.copy(alpha = 0.2f))
                         if (row.yandexTime == "-") {
