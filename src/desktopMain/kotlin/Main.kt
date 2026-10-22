@@ -157,11 +157,6 @@ val MONTH_NAMES_BY_NUM = mapOf(
     7 to "июля", 8 to "августа", 9 to "сентября", 10 to "октября", 11 to "ноября", 12 to "декабря"
 )
 
-val MONTH_NAMES_NOMINATIVE = mapOf(
-    1 to "Январь", 2 to "Февраль", 3 to "Март", 4 to "Апрель", 5 to "Май", 6 to "Июнь",
-    7 to "Июль", 8 to "Август", 9 to "Сентябрь", 10 to "Октябрь", 11 to "Ноябрь", 12 to "Декабрь"
-)
-
 // ==================== 4. БАЗОВЫЕ УТИЛИТЫ ====================
 
 fun getCachedAfishaFile(): File {
@@ -1443,6 +1438,7 @@ fun TrainDossierDialog(row: StationComparisonRow, onDismiss: () -> Unit) {
 
 // ==================== 10. ГЛАВНЫЙ ЭКРАН (TrainRApp) ====================
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun TrainRApp() {
     val cachedAfisha = remember { getCachedAfishaFile() }
