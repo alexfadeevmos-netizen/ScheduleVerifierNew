@@ -193,13 +193,73 @@ gradlew clean createDistributable
 
 Важно: Не копируйте один только файл Train-R.exe отдельно на Рабочий стол без папок app и runtime — иначе он выдаст короткий звук и не запустится. Если нужна иконка на Рабочем столе, нажмите правой кнопкой мыши на Train-R.exe ➔ Отправить ➔ Рабочий стол (создать ярлык).
 
+ВОТ СНОВА ОШИБКА Job 126835228177 in alexfadeevmos-netizen/ScheduleVerifierNew
+
+
+
+View file src/desktopMain/kotlin/Main.kt
+
+This job failed during the Kotlin compile step, not at runtime.
+
+The build log shows the task :compileKotlinDesktop failed with many errors like:
+
+Syntax error: Expecting a top level declaration
+imports are only allowed in the beginning of file
+Conflicting overloads: fun main(): Unit
+The root cause is in src/desktopMain/kotlin/Main.kt: https://github.com/alexfadeevmos-netizen/ScheduleVerifierNew/blob/88c6c0c9ff2bb6781593886e6f78d6b38ee7829a/src/desktopMain/kotlin/Main.kt
+
+That file contains a large block of stray non-code text/chat content before the actual Kotlin source, and then the imports and declarations are no longer in the correct order. Kotlin requires package and import statements to appear at the top of the file before any top-level declarations or code. Because the file is malformed, the compiler cannot parse it and aborts the build with exit code 1.
+
+In short: the job failed because Main.kt is syntactically invalid Kotlin, and Gradle stopped at the compilation stage.
+
+Ваш KT файл готов
+
+Значок KT-файла
+Main-v2
+ KT 
+Почему возникла эта ошибка в GitHub Actions:
+Судя по тексту отчета GitHub (contains a large block of stray non-code text/chat content before the actual Kotlin source и Conflicting overloads: fun main()), при вставке кода в файл src/desktopMain/kotlin/Main.kt на GitHub случайно попал либо текст сообщения из чата в самом верху, либо новый код был вставлен поверх старого без предварительной очистки файла (из-за чего в файле оказалось сразу два блока import и две функции fun main()).
+
+В прикрепленном файле Main-v2.kt — строго чистый Kotlin-код без единого лишнего символа:
+
+Строка 1: @file:JvmName("MainKt")   
+Main.kt
+
+Строка 2: package com.scheduleverifier.desktop   
+Main.kt
+
+Далее идут только import и код программы с единственной точкой входа fun main() в самом низу.   
+Main.kt
+
+Что делать дальше (пошагово, чтобы сборка в GitHub прошла с первого раза):
+Скачайте файл Main-v2.kt по кнопке выше на свой компьютер (не копируйте текст из окна чата, а именно скачайте сам файл).
+
+Откройте ваш репозиторий на GitHub и перейдите в папку src/desktopMain/kotlin/.
+
+Проверьте соседние файлы в папке src/desktopMain/kotlin/:
+Если там кроме Main.kt лежит ещё какой-то старый .kt файл (например, Qwen_kotlin_...kt), удалите его, иначе компилятор снова выдаст ошибку Conflicting overloads: fun main(), так как увидит две одинаковые программы в одной папке.
+
+Полностью замените содержимое src/desktopMain/kotlin/Main.kt:
+
+Откройте Main.kt на GitHub и нажмите иконку карандаша (Edit this file).
+
+Кликните внутрь редактора кода, нажмите Ctrl + A (выделить вообще всё, что там есть) и нажмите Delete, чтобы поле стало абсолютно пустым.
+
+Откройте скачанный Main-v2.kt в Блокноте на компьютере, нажмите Ctrl + A, затем Ctrl + C, и вставьте (Ctrl + V) в пустое окно на GitHub.
+
+Проверка глазами: Первая строчка в редакторе на GitHub должна быть @file:JvmName("MainKt"), а вторая — package com.scheduleverifier.desktop. Выше них не должно быть ни одной строчки текста.   
+Main.kt
+Ещё 1
+
+Нажмите зеленую кнопку Commit changes... — GitHub Actions автоматически перезапустит сборку и скомпилирует проект без ошибок.
+
 
 
 
 
 Gemini — это ИИ. Он может ошибаться.
 
-Выполняю анализ
+Обработано и проанализировано в коде
 @file:JvmName("MainKt")
 package com.scheduleverifier.desktop
 
@@ -2577,5 +2637,5 @@ fun main() {
         reportFatalStartupError(t)
     }
 }
-Main.kt
-Показан объект "Main.kt".
+Main-v2.kt
+Показан объект "Main-v2.kt".
