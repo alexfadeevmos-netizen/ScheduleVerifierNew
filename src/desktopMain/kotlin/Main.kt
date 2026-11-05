@@ -2111,23 +2111,65 @@ fun DetailedReportTrainCard(row: StationComparisonRow, accentColor: Color, onCli
 }
 
 @Composable
-fun CalendarGridPickerDialog(availableDates: List<SingleDateFilterOption>, initialSelected: Set<SingleDateFilterOption>, onDismiss: () -> Unit, onConfirm: (Set<SingleDateFilterOption>) -> Unit) {
+fun CalendarGridPickerDialog(
+    availableDates: List<SingleDateFilterOption>,
+    initialSelected: Set<SingleDateFilterOption>,
+    onDismiss: () -> Unit,
+    onConfirm: (Set<SingleDateFilterOption>) -> Unit
+) {
+    var selectedDates by remember(availableDates, initialSelected) {
+        mutableStateOf(initialSelected.intersect(availableDates.toSet()))
+    }
+
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(12.dp), color = Color.White) {
             Column(modifier = Modifier.padding(16.dp).width(400.dp)) {
                 Text("Выбор дат", fontWeight = FontWeight.Black, fontSize = 16.sp)
-                Spacer(Modifier.height(16.dp))
-                LazyColumn(modifier = Modifier.height(300.dp)) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TextButton(onClick = { selectedDates = availableDates.toSet() }) {
+                        Text("Выбрать все")
+                    }
+                    TextButton(onClick = { selectedDates = emptySet() }) {
+                        Text("Снять выбор")
+                    }
+                }
+                LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
                     items(availableDates) { date ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(checked = date in initialSelected, onCheckedChange = { /* handle */ })
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                selectedDates = if (date in selectedDates) {
+                                    selectedDates - date
+                                } else {
+                                    selectedDates + date
+                                }
+                            }.padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = date in selectedDates,
+                                onCheckedChange = { checked ->
+                                    selectedDates = if (checked) {
+                                        selectedDates + date
+                                    } else {
+                                        selectedDates - date
+                                    }
+                                }
+                            )
                             Text(date.displayLabel)
                         }
                     }
                 }
-                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
                     TextButton(onClick = onDismiss) { Text("Отмена") }
-                    Button(onClick = { onConfirm(initialSelected) }) { Text("ОК") }
+                    Button(onClick = { onConfirm(selectedDates) }) { Text("ОК") }
                 }
             }
         }
