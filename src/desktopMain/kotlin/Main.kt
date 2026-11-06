@@ -196,7 +196,19 @@ object PolygonConfig {
         return ALL_STATIONS.firstOrNull { it.equals(clean, ignoreCase = true) } ?: clean
     }
 
-    fun isTrainToMoscow(trainNumber: String): Boolean {
+    // МЦД-3: Ипподром (на Москву) или Крюково (на область)
+    // Логика направления: если поезд имеет дробь 7301/7302, определяем направление по маршруту
+    fun isTrainToMoscow(trainNumber: String, route: String = ""): Boolean {
+        // Если указано "до Ипподром" или "на Ипподром" -> НА МОСКВУ
+        if (route.contains("Ипподром", ignoreCase = true) || route.contains("до Москвы", ignoreCase = true) || route.contains("на Москву", ignoreCase = true) || route.contains("47 км", ignoreCase = true)) {
+            return true
+        }
+        // Если указано "до Крюково" или "из Москвы" -> ОТ МОСКВЫ
+        if (route.contains("до Крюково", ignoreCase = true) || route.contains("из Москвы", ignoreCase = true) || route.contains("от Москвы", ignoreCase = true) || route.contains("до Твери", ignoreCase = true) || route.contains("до Клина", ignoreCase = true)) {
+            return false
+        }
+        
+        // Резервная проверка по номеру
         val firstPart = trainNumber.split("/").firstOrNull()?.trim() ?: trainNumber
         val digits = Regex("\\d+").find(firstPart)?.value ?: return true
         val lastDigit = digits.lastOrNull()?.digitToIntOrNull() ?: return true
@@ -250,7 +262,7 @@ fun buildRemainingStopsNote(
 ): String {
     val parts = mutableListOf<String>()
     if (skippedStops.isNotEmpty()) {
-        parts.add("без ост.: " + skippedStops.distinct().joinToString(", "))
+        parts.add("отменены остановки: " + skippedStops.distinct().joinToString(", "))
     }
     if (addedStops.isNotEmpty()) {
         parts.add("назн. ост.: " + addedStops.distinct().joinToString(", "))
@@ -529,7 +541,6 @@ object FileParsers {
             for (line in lines) {
                 val trMatch = trainRegex.find(line) ?: continue
                 val trainNum = trMatch.groupValues[1]
-                val isToMsk = PolygonConfig.isTrainToMoscow(trainNum)
                 
                 // Исключаем отмену остановок из статуса "Отменен"
                 val isCanceled = (line.contains("отменяется", true) || line.contains("отменен", true) || line.contains("отменить", true)) &&
@@ -592,13 +603,19 @@ object FileParsers {
                 }
 
                 for (st in targetStations) {
+                    val isToMsk = PolygonConfig.isTrainToMoscow(trainNum, line)
                     if (st == "Левобережная" && !isToMsk) continue
 
                     val afishaT = afishaMap[trainNum]?.stationTimes?.get(st) ?: "—"
                     val tgT = if (isCanceled) "ОТМЕНЕН" else (stationDepTimes[st] ?: afishaT)
-                    val routeStr = afishaMap[trainNum]?.route ?: if (isToMsk) "Крюково — Москва" else "Москва — Крюково"
-                    val isMcd = PolygonConfig.isMcdTrain(trainNum, routeStr)
-                    val isExp = PolygonConfig.isExpressTrain(trainNum, routeStr)
+                    val routeStr = when {
+                        line.contains("Ипподром", ignoreCase = true) || line.contains("47 км", ignoreCase = true) -> if (isToMsk) "до Ипп. (47 км)" else "до Крюково"
+                        line.contains("Крюково", ignoreCase = true) && !isToMsk -> "до Крюково"
+                        line.contains("Тверь", ignoreCase = true) && !isToMsk -> "до Твери"
+                        else -> if (isToMsk) "до Москвы" else "из Москвы"
+                    }
+                    val isMcd = PolygonConfig.isMcdTrain(trainNum, line)
+                    val isExp = PolygonConfig.isExpressTrain(trainNum, line)
 
                     val remNote = buildRemainingStopsNote(skippedStops, addedStops)
                     val changeSummary = when {
@@ -608,8 +625,8 @@ object FileParsers {
                     }
 
                     val wordText = when {
-                        isCanceled -> "№$trainNum до Москвы отправлением в $afishaT - ОТМЕНЕН".replace("до Москвы", if (isToMsk) "до Москвы" else "из Москвы")
-                        else -> "№$trainNum ($routeStr) отправлением в $afishaT - отправится в $tgT ($remNote)"
+                        isCanceled -> "№$trainNum $routeStr отправлением в $afishaT - ОТМЕНЕН"
+                        else -> "№$trainNum $routeStr отправлением в $afishaT - отправится в $tgT. $remNote"
                     }
 
                     for (dateKey in detectedDates.distinct()) {
@@ -672,9 +689,7 @@ object FileParsers {
         existingMap: StationDateTrainMap
     ): StationDateTrainMap {
         val text = readSmartTextFile(file)
-        val fileNameLower = file.name.lowercase(Locale.getDefault())
-        val defaultIsToMoscow = !fileNameLower.contains("от_москвы") && !fileNameLower.contains("от москвы")
-
+        
         val mutableResult = mutableMapOf<String, MutableMap<String, MutableList<TrainChangeRow>>>()
         for ((st, dtMap) in existingMap) {
             val mDt = mutableMapOf<String, MutableList<TrainChangeRow>>()
@@ -730,13 +745,7 @@ object FileParsers {
             val trMatch = trainNumberRegex.find(trimmed)
             if (trMatch != null) {
                 val trNum = trMatch.groupValues[1]
-                val isToMsk = if (trimmed.contains("из Москвы", ignoreCase = true) || trimmed.contains("от Москвы", ignoreCase = true)) {
-                    false
-                } else if (trimmed.contains("до Москвы", ignoreCase = true) || trimmed.contains("на Москву", ignoreCase = true)) {
-                    true
-                } else {
-                    PolygonConfig.isTrainToMoscow(trNum).takeIf { trNum.isNotEmpty() } ?: defaultIsToMoscow
-                }
+                val isToMsk = PolygonConfig.isTrainToMoscow(trNum, trimmed)
 
                 if (currentStation == "Левобережная" && !isToMsk) continue
 
@@ -758,13 +767,14 @@ object FileParsers {
                 }
 
                 val routeStr = when {
-                    trimmed.contains("Ипподром", ignoreCase = true) -> if (isToMsk) "Крюково — Ипподром" else "Ипподром — Крюково"
+                    trimmed.contains("Ипподром", ignoreCase = true) || trimmed.contains("47 км", ignoreCase = true) -> if (isToMsk) "до Ипподрома (47 км)" else "до Крюково"
+                    trimmed.contains("Крюково", ignoreCase = true) && !isToMsk -> "до Крюково"
+                    trimmed.contains("Тверь", ignoreCase = true) && !isToMsk -> "до Твери"
                     else -> if (isToMsk) "до Москвы" else "из Москвы"
                 }
                 
-                val dirStr = if (isToMsk) "до Москвы" else "от Москвы"
                 val wordText = if (isCanceled) {
-                    "№$trNum $dirStr отправлением в $afishaT - ОТМЕНЕН"
+                    "№$trNum $routeStr отправлением в $afishaT - ОТМЕНЕН"
                 } else {
                     trimmed
                 }
@@ -959,7 +969,7 @@ object WordCancelGenerator {
     private fun addCenteredBoldHeader(doc: XWPFDocument, text: String) {
         val p = doc.createParagraph()
         p.alignment = ParagraphAlignment.CENTER
-        p.spacingAfter = 0
+        p.spacingAfter = 0 
         p.spacingBefore = 0
         p.setSpacingBetween(1.0, LineSpacingRule.AUTO)
         val run = p.createRun()
