@@ -571,11 +571,9 @@ object FileParsers {
                             if (isTech) {
                                 skippedStops.add(stName)
                             } else {
-                               // БЕРЁМ СТРОГО ВТОРОЕ ВРЕМЯ (ВРЕМЯ ОТПРАВЛЕНИЯ)
                                 stationDepTimes[stName] = t2
                             }
                         } else {
-                            // ОДНО ВРЕМЯ: Если начальная станция — это время отправления, если промежуточная — проследование без остановки!
                             if (idx == 0) {
                                 stationDepTimes[stName] = t1
                             } else {
@@ -592,7 +590,6 @@ object FileParsers {
                 }
 
                 for (st in targetStations) {
-                    // На Левобережной закрыта платформа №2 (путь №2 «от Москвы»)
                     if (st == "Левобережная" && !isToMsk) continue
 
                     val afishaT = afishaMap[trainNum]?.stationTimes?.get(st) ?: "—"
@@ -698,7 +695,6 @@ object FileParsers {
             val trimmed = rawLine.trim()
             if (trimmed.isEmpty()) continue
 
-            // Строго исключаем строки с «прибытием в / прибывает в / прибудет в»
             if (arrivalFilterRegex.containsMatchIn(trimmed)) continue
 
             val stHeaderMatch = stationHeaderRegex.find(trimmed)
@@ -740,7 +736,6 @@ object FileParsers {
                     PolygonConfig.isTrainToMoscow(trNum).takeIf { trNum.isNotEmpty() } ?: defaultIsToMoscow
                 }
 
-                // Исключаем Левобережную от Москвы (платформа №2 закрыта)
                 if (currentStation == "Левобережная" && !isToMsk) continue
 
                 val timesFound = Regex("(\\d{1,2}:\\d{2})").findAll(trimmed).map { it.groupValues[1].padStart(5, '0') }.toList()
@@ -860,7 +855,6 @@ object WordCancelGenerator {
             val datesToProcess = if (selectedDates.isEmpty()) stationDateMap.keys else stationDateMap.keys.intersect(selectedDates)
             if (datesToProcess.isEmpty()) continue
 
-            // Группировка идентичных дат (со стиранием "(в ночь на ...)" для сравнения)
             val signatureToDates = linkedMapOf<String, MutableList<String>>()
             val dateToCleanLines = mutableMapOf<String, List<String>>()
 
@@ -889,9 +883,7 @@ object WordCancelGenerator {
             XWPFDocument().use { doc ->
                 val subtitle = getDirectionSubtitle(station, isToMoscow)
 
-                // 1-я строка заголовка (14 pt, по центру, полужирный)
                 addCenteredBoldHeader(doc, "$station  Изменения в графике движения эл/поездов")
-                // 2-я строка подзаголовка направления (14 pt, по центру, полужирный)
                 addCenteredBoldHeader(doc, subtitle)
 
                 var currentPageLineCount = 2
@@ -905,7 +897,6 @@ object WordCancelGenerator {
                         currentPageLineCount = 2
                     }
 
-                    // Строка даты (по центру, полужирный, 14 pt)
                     addCenteredBoldHeader(doc, formattedDatesHeader)
                     currentPageLineCount++
 
@@ -924,7 +915,6 @@ object WordCancelGenerator {
                             rawLine.trim()
                         }
 
-                        // Строка поезда: 12 pt, по левому краю, отступ 8 пробелов
                         val p = doc.createParagraph()
                         p.alignment = ParagraphAlignment.LEFT
                         p.spacingAfter = 0
@@ -1148,7 +1138,6 @@ fun TrainRApp() {
     var showCalendarDialog: Boolean by remember { mutableStateOf(false) }
     var selectedTrainForDossier: TrainChangeRow? by remember { mutableStateOf(null) }
 
-    // Автозагрузка кэшированной Афиши при старте приложения
     LaunchedEffect(Unit) {
         if (FileParsers.cachedAfishaFile.exists()) {
             withContext(Dispatchers.IO) {
@@ -1196,7 +1185,6 @@ fun TrainRApp() {
     }
 
     Row(modifier = Modifier.fillMaxSize().background(TrainRTheme.BgLight)) {
-        // ЛЕВАЯ НАВИГАЦИОННАЯ ПАНЕЛЬ (Sidebar 220.dp)
         Column(
             modifier = Modifier
                 .width(220.dp)
@@ -1233,27 +1221,26 @@ fun TrainRApp() {
 
                 SidebarNavButton(
                     title = MainNavTab.UPLOADS.title,
-                    icon = Icons.Default.Description,
+                    icon = Icons.Default.List,
                     isSelected = currentNavTab == MainNavTab.UPLOADS,
                     onClick = { currentNavTab = MainNavTab.UPLOADS }
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 SidebarNavButton(
                     title = MainNavTab.REPORTS.title,
-                    icon = Icons.Default.Assessment,
+                    icon = Icons.Default.Info,
                     isSelected = currentNavTab == MainNavTab.REPORTS,
                     onClick = { currentNavTab = MainNavTab.REPORTS }
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 SidebarNavButton(
                     title = MainNavTab.YANDEX.title,
-                    icon = Icons.Default.FactCheck,
+                    icon = Icons.Default.CheckCircle,
                     isSelected = currentNavTab == MainNavTab.YANDEX,
                     onClick = { currentNavTab = MainNavTab.YANDEX }
                 )
             }
 
-            // Блок «Статус системы» внизу сайдбара
             Surface(
                 color = TrainRTheme.SidebarActive,
                 shape = RoundedCornerShape(10.dp),
@@ -1287,9 +1274,7 @@ fun TrainRApp() {
             }
         }
 
-        // ОСНОВНАЯ РАБОЧАЯ ОБЛАСТЬ СПРАВА
         Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-            // ВЕРХНЯЯ ПАНЕЛЬ (Top Bar)
             Surface(
                 color = Color.White,
                 shadowElevation = 2.dp,
@@ -1302,7 +1287,6 @@ fun TrainRApp() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Поле быстрого поиска по номеру поезда
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
@@ -1328,7 +1312,6 @@ fun TrainRApp() {
                         modifier = Modifier.width(320.dp).height(50.dp)
                     )
 
-                    // 4 кнопки загрузки источников данных
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         TopBarLoadButton(
                             label = "ЯНДЕКС",
@@ -1421,7 +1404,6 @@ fun TrainRApp() {
                 }
             }
 
-            // ПАНЕЛЬ УПРАВЛЕНИЯ И ВЫБОРА СТАНЦИЙ (под верхней панелью)
             Surface(
                 color = Color.White,
                 border = BorderStroke(1.dp, TrainRTheme.BorderCol),
@@ -1439,7 +1421,7 @@ fun TrainRApp() {
                                 onClick = { showCalendarDialog = true },
                                 shape = RoundedCornerShape(8.dp)
                             ) {
-                                Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 val dateBtnLabel = if (selectedFilterDates.isEmpty()) {
                                     "ФИЛЬТР ПО ДАТЕ (ВСЕ: ${allDatesWithChanges.size})"
@@ -1456,7 +1438,7 @@ fun TrainRApp() {
                                 },
                                 shape = RoundedCornerShape(8.dp)
                             ) {
-                                Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("СВЕРИТЬ ВСЕ", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             }
@@ -1468,7 +1450,6 @@ fun TrainRApp() {
                             }
                         }
 
-                        // Главная синяя кнопка «СОЗДАТЬ ОТМЕНЫ» (стиль CREATE EVENT)
                         Button(
                             onClick = {
                                 scope.launch(Dispatchers.IO) {
@@ -1485,7 +1466,7 @@ fun TrainRApp() {
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
                         ) {
-                            Icon(Icons.Default.Description, contentDescription = null, tint = Color.White)
+                            Icon(Icons.Default.Create, contentDescription = null, tint = Color.White)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "СОЗДАТЬ ОТМЕНЫ (${checkedStationsForWord.size} СТ.)",
@@ -1533,7 +1514,6 @@ fun TrainRApp() {
                         }
                     }
 
-                    // FlowRow со списком всех станций и чекбоксами
                     FlowRow(
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1586,7 +1566,6 @@ fun TrainRApp() {
                 }
             }
 
-            // ПЕРЕКЛЮЧЕНИЕ МЕЖДУ 3 ОСНОВНЫМИ ВКЛАДКАМИ
             Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)) {
                 when (currentNavTab) {
                     MainNavTab.UPLOADS -> {
@@ -1620,7 +1599,6 @@ fun TrainRApp() {
         }
     }
 
-    // МОДАЛЬНОЕ ОКНО КАЛЕНДАРЯ (на 2 месяца вперёд)
     if (showCalendarDialog) {
         CalendarGridPickerDialog(
             availableDatesWithChanges = allDatesWithChanges,
@@ -1637,7 +1615,6 @@ fun TrainRApp() {
         )
     }
 
-    // МОДАЛЬНОЕ ОКНО «ДОСЬЕ ПОЕЗДА»
     val dossierTarget = selectedTrainForDossier
     if (dossierTarget != null) {
         TrainDossierDialog(
@@ -1662,7 +1639,6 @@ fun VintageTrainLogo(modifier: Modifier = Modifier) {
             size = Size(w, h),
             cornerRadius = CornerRadius(12f, 12f)
         )
-        // Корпус электропоезда
         val bodyPath = Path().apply {
             moveTo(w * 0.22f, h * 0.20f)
             lineTo(w * 0.78f, h * 0.20f)
@@ -1671,20 +1647,17 @@ fun VintageTrainLogo(modifier: Modifier = Modifier) {
             close()
         }
         drawPath(path = bodyPath, color = Color.White)
-        // Лобовое стекло
         drawRoundRect(
             color = TrainRTheme.NavyDark,
             topLeft = Offset(w * 0.28f, h * 0.27f),
             size = Size(w * 0.44f, h * 0.20f),
             cornerRadius = CornerRadius(4f, 4f)
         )
-        // Прожектор и буферные фонари
         drawCircle(
             color = TrainRTheme.GoldAccent,
             radius = w * 0.05f,
             center = Offset(w * 0.50f, h * 0.58f)
         )
-        // Рельсы / шпалы снизу
         drawLine(
             color = TrainRTheme.GoldAccent,
             start = Offset(w * 0.15f, h * 0.82f),
@@ -1743,7 +1716,7 @@ fun TopBarLoadButton(
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Icon(
-            imageVector = Icons.Default.UploadFile,
+            imageVector = Icons.Default.Add,
             contentDescription = label,
             tint = TrainRTheme.TextDark,
             modifier = Modifier.size(16.dp)
@@ -1810,7 +1783,6 @@ fun TrainTableSection(
         modifier = Modifier.fillMaxSize()
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Шапка таблицы с переключателем направлений и чипами фильтрации
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1870,7 +1842,6 @@ fun TrainTableSection(
                 }
             }
 
-            // Заголовок колонок таблицы
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2590,10 +2561,6 @@ fun MonthGridCalendar(
         }
     }
 }
-
-// ============================================================================
-// 10. СИСТЕМНЫЙ ДИАЛОГ ВЫБОРА ФАЙЛОВ WINDOWS
-// ============================================================================
 
 fun pickFilesDialog(
     title: String,
