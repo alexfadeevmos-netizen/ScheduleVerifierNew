@@ -29,7 +29,7 @@ kotlin {
 
 compose.desktop {
     application {
-        mainClass = "MainKt"
+       mainClass = "com.scheduleverifier.desktop.MainKt"
         nativeDistributions {
             targetFormats(
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
