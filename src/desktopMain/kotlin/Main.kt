@@ -199,16 +199,13 @@ object PolygonConfig {
     // МЦД-3: Ипподром (на Москву) или Крюково (на область)
     // Логика направления: если поезд имеет дробь 7301/7302, определяем направление по маршруту
     fun isTrainToMoscow(trainNumber: String, route: String = ""): Boolean {
-        // Если указано "до Ипподром" или "на Ипподром" -> НА МОСКВУ
         if (route.contains("Ипподром", ignoreCase = true) || route.contains("до Москвы", ignoreCase = true) || route.contains("на Москву", ignoreCase = true) || route.contains("47 км", ignoreCase = true)) {
             return true
         }
-        // Если указано "до Крюково" или "из Москвы" -> ОТ МОСКВЫ
         if (route.contains("до Крюково", ignoreCase = true) || route.contains("из Москвы", ignoreCase = true) || route.contains("от Москвы", ignoreCase = true) || route.contains("до Твери", ignoreCase = true) || route.contains("до Клина", ignoreCase = true)) {
             return false
         }
         
-        // Резервная проверка по номеру
         val firstPart = trainNumber.split("/").firstOrNull()?.trim() ?: trainNumber
         val digits = Regex("\\d+").find(firstPart)?.value ?: return true
         val lastDigit = digits.lastOrNull()?.digitToIntOrNull() ?: return true
@@ -305,7 +302,6 @@ fun mergeSameTrainRowsForDay(rows: List<TrainChangeRow>): List<TrainChangeRow> {
             val latestExportTime = sameTrains.map { it.exportTime }.lastOrNull { it != "—" && it.isNotBlank() } ?: base.exportTime
             val latestYandexTime = sameTrains.map { it.yandexTime }.lastOrNull { it != "—" && it.isNotBlank() } ?: base.yandexTime
 
-            // БЕРЕМ САМУЮ ДЛИННУЮ СТРОКУ, ЧТОБЫ ИЗБЕЖАТЬ ДУБЛИРОВАНИЯ И "КАШИ"
             val mergedActualText = sameTrains.map { it.actualChangesText.trim() }
                 .filter { it.isNotEmpty() }
                 .maxByOrNull { it.length } ?: ""
@@ -542,12 +538,8 @@ object FileParsers {
                 val trMatch = trainRegex.find(line) ?: continue
                 val trainNum = trMatch.groupValues[1]
                 
-                // Исключаем отмену остановок из статуса "Отменен"
-                val isCanceled = (line.contains("отменяется", true) || line.contains("отменен", true) || line.contains("отменить", true)) &&
-                                 !line.contains("остановк", true) &&
-                                 !line.contains("стоянк", true) &&
-                                 !line.contains("отправится", true) &&
-                                 !line.contains("назначается", true)
+                val isCanceled = Regex("\\b(отменяется|отмен[её]н|отменить)\\b", RegexOption.IGNORE_CASE).containsMatchIn(line) && 
+                                 !Regex("\\bотменен[а-я]*\\s+остановк", RegexOption.IGNORE_CASE).containsMatchIn(line)
                                  
                 val isAppointed = line.contains("назначается", ignoreCase = true) || line.contains("назначить", ignoreCase = true)
 
@@ -752,11 +744,8 @@ object FileParsers {
                 val timesFound = Regex("(\\d{1,2}:\\d{2})").findAll(trimmed).map { it.groupValues[1].padStart(5, '0') }.toList()
                 val afishaT = timesFound.firstOrNull() ?: (afishaMap[trNum]?.stationTimes?.get(currentStation) ?: "—")
                 
-                val isCanceled = (trimmed.contains("отменяется", true) || trimmed.contains("отменен", true) || trimmed.contains("отменить", true)) &&
-                                 !trimmed.contains("остановк", true) &&
-                                 !trimmed.contains("стоянк", true) &&
-                                 !trimmed.contains("отправится", true) &&
-                                 !trimmed.contains("назначается", true)
+                val isCanceled = Regex("\\b(отменяется|отмен[её]н|отменить)\\b", RegexOption.IGNORE_CASE).containsMatchIn(trimmed) && 
+                                 !Regex("\\bотменен[а-я]*\\s+остановк", RegexOption.IGNORE_CASE).containsMatchIn(trimmed)
                                  
                 val isAppointed = trimmed.contains("назначается", ignoreCase = true)
                 val expT = when {
@@ -1361,70 +1350,72 @@ fun TrainRApp() {
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("СВЕРИТЬ ВСЕ", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             }
-
-                            OutlinedButton(
-                                onClick = {
-                                    stationScheduleMap = emptyMap()
-                                    afishaCacheMap = emptyMap()
-                                    yandexTrainsList = emptyList()
-                                    loadedYandexCount = 0
-                                    loadedAfishaCount = 0
-                                    loadedTelegramsCount = 0
-                                    loadedExportsCount = 0
-                                    selectedFilterDates = emptySet()
-                                    checkedStationsForWord = emptySet()
-                                    searchQuery = ""
-                                    
-                                    scope.launch(Dispatchers.IO) {
-                                        try {
-                                            if (FileParsers.cachedAfishaFile.exists()) {
-                                                FileParsers.cachedAfishaFile.delete()
-                                            }
-                                        } catch (e: Exception) {}
-                                    }
-                                    
-                                    systemStatusText = "Все данные сброшены, кэш очищен."
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = TrainRTheme.RedCancel),
-                                border = BorderStroke(1.dp, TrainRTheme.RedCancel.copy(alpha = 0.5f))
-                            ) {
-                                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("СБРОСИТЬ И УДАЛИТЬ", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
-
-                            if (selectedFilterDates.isNotEmpty()) {
-                                TextButton(onClick = { selectedFilterDates = emptySet() }) {
-                                    Text("Сбросить фильтр дат", fontSize = 12.sp, color = TrainRTheme.RedCancel)
-                                }
-                            }
+                            
+                            // Изменение: Убрал кнопку сброса и кнопку удалить
                         }
 
-                        Button(
-                            onClick = {
-                                scope.launch(Dispatchers.IO) {
-                                    val (count, folder) = WordCancelGenerator.generateStationWordFiles(
-                                        selectedStations = checkedStationsForWord,
-                                        selectedDates = selectedFilterDates,
-                                        directionTab = currentDirectionTab,
-                                        allData = stationScheduleMap
-                                    )
-                                    systemStatusText = "Сформировано файлов Word (.docx): $count шт. Папка: ${folder.absolutePath}"
+                        // Изменение: Добавлен layout-фикс. Кнопка не будет пропадать, если фильтров дат станет слишком много
+                        // Теперь для кнопок выделен отдельный Box, который не дает им "сплющиваться"
+                        Box(modifier = Modifier.weight(1f, fill = false)) {
+                            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                                OutlinedButton(
+                                    onClick = {
+                                        stationScheduleMap = emptyMap()
+                                        afishaCacheMap = emptyMap()
+                                        yandexTrainsList = emptyList()
+                                        loadedYandexCount = 0
+                                        loadedAfishaCount = 0
+                                        loadedTelegramsCount = 0
+                                        loadedExportsCount = 0
+                                        selectedFilterDates = emptySet()
+                                        checkedStationsForWord = emptySet()
+                                        searchQuery = ""
+                                        
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                if (FileParsers.cachedAfishaFile.exists()) {
+                                                    FileParsers.cachedAfishaFile.delete()
+                                                }
+                                            } catch (e: Exception) {}
+                                        }
+                                        
+                                        systemStatusText = "Все данные сброшены, кэш очищен."
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TrainRTheme.RedCancel),
+                                    border = BorderStroke(1.dp, TrainRTheme.RedCancel.copy(alpha = 0.5f))
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("СБРОСИТЬ", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = TrainRTheme.ActionBlue),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
-                        ) {
-                            Icon(Icons.Default.Create, contentDescription = null, tint = Color.White)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "СОЗДАТЬ ОТМЕНЫ (${checkedStationsForWord.size} СТ.)",
-                                color = Color.White,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 13.sp
-                            )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Button(
+                                    onClick = {
+                                        scope.launch(Dispatchers.IO) {
+                                            val (count, folder) = WordCancelGenerator.generateStationWordFiles(
+                                                selectedStations = checkedStationsForWord,
+                                                selectedDates = selectedFilterDates,
+                                                directionTab = currentDirectionTab,
+                                                allData = stationScheduleMap
+                                            )
+                                            systemStatusText = "Сформировано файлов Word (.docx): $count шт. Папка: ${folder.absolutePath}"
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = TrainRTheme.ActionBlue),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                                ) {
+                                    Icon(Icons.Default.Create, contentDescription = null, tint = Color.White)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "СОЗДАТЬ ОТМЕНЫ (${checkedStationsForWord.size} СТ.)",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -2292,7 +2283,7 @@ fun TrainDossierDialog(
                                 text = stop.telegramTime,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = if (stop.isSkippedByTelegram) TrainRTheme.RedCancel else TrainRTheme.GreenSuccess,
+                                color = if (stop.isSkippedByTelegram) TrainRTheme.RedCancel else TrainRTheme.TextDark,
                                 fontSize = 12.sp,
                                 modifier = Modifier.weight(1.2f)
                             )
