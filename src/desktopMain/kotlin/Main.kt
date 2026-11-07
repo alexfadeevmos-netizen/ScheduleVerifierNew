@@ -615,7 +615,9 @@ object FileParsers {
             var currentDates = mutableListOf("19 октября")
 
             for (para in paragraphs) {
-                val cleanPara = para.replace("\n", " ").replace("\r", "").trim()
+                val cleanPara = para.replace("\n", " ").replace("\r", "")
+                    .replace(Regex("\\s*\\(в\\s+ночь\\s+на\\s+[^)]+\\)", RegexOption.IGNORE_CASE), "")
+                    .trim()
                 if (cleanPara.isEmpty()) continue
 
                 val extractedDates = dateRegex.findAll(cleanPara).map { it.groupValues[1] + " " + it.groupValues[2].lowercase(Locale.getDefault()) }.toList()
@@ -870,6 +872,8 @@ object FileParsers {
 
         for (paragraph in paragraphs) {
             var cleanParagraph = paragraph.replace(Regex("[.\\s]*Изменений\\s*нет\\.?", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("Бологое[- ]*Моск(?:овское)?\\.?", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("\\s*\\(в\\s+ночь\\s+на\\s+[^)]+\\)", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("\\.{2,}"), ".")
                 .replace(Regex("\\s{2,}"), " ")
                 .trim()
@@ -1038,10 +1042,10 @@ object WordCancelGenerator {
 
                 val sortedLines = filteredRows.sortedBy { row ->
                     getSortingTime(row)
-                }.map { it.wordExportLine.trim() }.distinct()
+                }.map { nightNoteRegex.replace(it.wordExportLine, "").trim() }.distinct()
 
                 dateToCleanLines[dateStr] = sortedLines
-                val normalizedSignature = sortedLines.joinToString("\n") { nightNoteRegex.replace(it, "").trim() }
+                val normalizedSignature = sortedLines.joinToString("\n")
                 signatureToDates.getOrPut(normalizedSignature) { mutableListOf() }.add(dateStr)
             }
 
@@ -1071,7 +1075,7 @@ object WordCancelGenerator {
                             addContinuationHeader(doc, station, formattedDatesHeader, subtitle)
                             currentPageLineCount = 2
                         }
-                        val finalTrainLine = if (isMergedMultipleDays) nightNoteRegex.replace(rawLine, "").trim() else rawLine.trim()
+                        val finalTrainLine = rawLine.trim()
                         val p = doc.createParagraph()
                         p.alignment = ParagraphAlignment.LEFT
                         p.spacingAfter = 0
