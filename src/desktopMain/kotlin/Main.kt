@@ -79,7 +79,7 @@ enum class DirectionTab(val title: String, val isToMoscow: Boolean) {
 enum class TrainFilterType(val label: String) {
     ALL("Все"),
     MCD("МЦД"),
-    EXPRESS("Экспрессы")
+    EXPRESS("Экспрессы / ПДС")
 }
 
 enum class AuditStatus(val label: String, val color: Color) {
@@ -211,7 +211,7 @@ object PolygonConfig {
 
     fun isMcdTrain(trainNumber: String, route: String): Boolean {
         if (trainNumber.contains("/")) return true
-        val digits = Regex("\\d{4}").find(trainNumber)?.value?.toIntOrNull() ?: 0
+        val digits = Regex("\\d{3,4}").find(trainNumber)?.value?.toIntOrNull() ?: 0
         if (digits in 7200..7499) return true
         if (route.contains("Ипподром", ignoreCase = true) || route.contains("47 км", ignoreCase = true)) return true
         return false
@@ -219,8 +219,9 @@ object PolygonConfig {
 
     fun isExpressTrain(trainNumber: String, route: String): Boolean {
         if (isMcdTrain(trainNumber, route)) return false
-        val digits = Regex("\\d{4}").find(trainNumber)?.value?.toIntOrNull() ?: 0
-        return digits in 7000..7999
+        val digits = Regex("\\d{3,4}").find(trainNumber)?.value?.toIntOrNull() ?: 0
+        // Захватываем ПДС (Сапсаны 758, 784) и пригородные экспрессы 7000+
+        return digits in 700..799 || digits in 7000..7999
     }
 }
 
@@ -314,12 +315,28 @@ fun calculateMinutesDiff(timeA: String, timeB: String): String {
 }
 
 fun parseTrainTimeForSorting(timeStr: String): Int {
-    if (timeStr == "—" || timeStr == "ОТМЕНЕН") return 9999
+    if (timeStr == "—" || timeStr.contains("ОТМЕН", true)) return 9999
     val reg = Regex("(\\d{1,2}):(\\d{2})")
     val m = reg.find(timeStr) ?: return 9999
     val hours = m.groupValues[1].toInt()
     val minutes = m.groupValues[2].toInt()
     return hours * 60 + minutes
+}
+
+fun getBaseTimeForSorting(row: TrainChangeRow): String {
+    // В первую очередь ищем оригинальное время по графику прямо в готовом тексте
+    val regex = Regex("(?i)отправлением\\s+в\\s+(\\d{1,2}:\\d{2})")
+    val match = regex.find(row.wordExportLine) ?: regex.find(row.actualChangesText)
+    
+    if (match != null) {
+        return match.groupValues[1].padStart(5, '0')
+    }
+    
+    // Резервный механизм
+    if (row.afishaTime != "—") return row.afishaTime
+    if (row.exportTime != "—" && !row.exportTime.contains("ОТМЕН", true)) return row.exportTime.take(5)
+    if (row.telegramTime != "—" && !row.telegramTime.contains("ОТМЕН", true)) return row.telegramTime.take(5)
+    return "99:99"
 }
 
 fun mergeSameTrainRowsForDay(rows: List<TrainChangeRow>): List<TrainChangeRow> {
@@ -390,10 +407,7 @@ fun mergeSameTrainRowsForDay(rows: List<TrainChangeRow>): List<TrainChangeRow> {
         }
     }
     return mergedList.sortedBy { row ->
-        val t = if (row.afishaTime != "—") row.afishaTime 
-                else if (row.telegramTime != "—" && row.telegramTime != "ОТМЕНЕН") row.telegramTime
-                else "99:99"
-        parseTrainTimeForSorting(t)
+        parseTrainTimeForSorting(getBaseTimeForSorting(row))
     }
 }
 
@@ -407,7 +421,7 @@ fun evaluateFourWayAuditStatus(
     globalError: String?
 ): AuditStatus {
     if (!globalError.isNullOrBlank()) return AuditStatus.GLOBAL_INFRA_ERROR
-    if (isCanceled && yandexTime != "—" && yandexTime != "ОТМЕНЕН") {
+    if (isCanceled && yandexTime != "—" && !yandexTime.contains("ОТМЕН", true)) {
         return AuditStatus.CRITICAL
     }
     if (telegramTime != "—" && exportTime != "—" && telegramTime != exportTime && !isCanceled) {
@@ -474,7 +488,8 @@ object FileParsers {
                             val row = sheet.getRow(rIdx) ?: continue
                             for (cIdx in 0 until row.lastCellNum.coerceAtLeast(0)) {
                                 val cellVal = extractCellText(row.getCell(cIdx))
-                                val m = Regex("\\b([67]\\d{3}(?:/[67]\\d{3})?)\\b").find(cellVal)
+                                // Паттерн включает ПДС (от 3 до 4 цифр)
+                                val m = Regex("\\b([1-7]\\d{2,3}(?:/[1-7]\\d{2,3})?)\\b").find(cellVal)
                                 if (m != null) {
                                     colToTrainNum[cIdx] = m.groupValues[1]
                                     trainHeaderRowIdx = rIdx
@@ -527,7 +542,8 @@ object FileParsers {
 
     fun parseTelegramFiles(files: List<File>, afishaMap: Map<String, AfishaBaseTrain>): StationDateTrainMap {
         val rawRowsByStationDate = mutableMapOf<String, MutableMap<String, MutableList<TrainChangeRow>>>()
-        val trainRegex = Regex("(?i)(?:нр\\.|№)\\s*([67]\\d{3}(?:/[67]\\d{3})?)")
+        // Расширенный захват для 3-4 значной нумерации ПДС
+        val trainRegex = Regex("(?i)(?:нр\\.|№)\\s*([1-7]\\d{2,3}(?:/[1-7]\\d{2,3})?)")
         val dateRegex = Regex("(?i)(\\d{1,2}(?:\\s*,\\s*\\d{1,2})*)\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)")
         val timePairRegex = Regex("([А-Яа-яЁё\\-\\s\\d]+?)\\s+(\\d{1,2}[.:]\\d{2})(?:\\s*[-–—]\\s*(\\d{1,2}[.:]\\d{2}))?")
 
@@ -542,7 +558,7 @@ object FileParsers {
                 val trimmed = line.trim()
                 if (trimmed.isEmpty()) continue
                 
-                val isNewTrainLine = Regex("^(?i)(?:нр\\.|№)\\s*[67]\\d{3}").containsMatchIn(trimmed)
+                val isNewTrainLine = Regex("^(?i)(?:нр\\.|№)\\s*[1-7]\\d{2,3}").containsMatchIn(trimmed)
                 val isMajorHeader = Regex("^(?i)(?:\\d+\\.|Отменить|Отменяются|Изменить)").containsMatchIn(trimmed) && !Regex("(?i)(?:нр\\.|№)").containsMatchIn(trimmed)
                 
                 if (isNewTrainLine || isMajorHeader) {
@@ -631,8 +647,20 @@ object FileParsers {
                         val isToMsk = PolygonConfig.isTrainToMoscow(trainNum, cleanPara)
                         if (st == "Левобережная" && !isToMsk) continue
 
-                        val afishaT = afishaMap[trainNum]?.stationTimes?.get(st) ?: "—"
-                        val tgT = if (isCanceled) "ОТМЕНЕН" else (stationDepTimes[st] ?: afishaT)
+                        // Интеллектуальный поиск оригинального времени, если Афиша не загружена
+                        val timesFound = Regex("(\\d{1,2}:\\d{2})").findAll(cleanPara).map { it.groupValues[1].padStart(5, '0') }.toList()
+                        val baseTimeMatch = Regex("(?i)отправлением\\s+в\\s+(\\d{1,2}:\\d{2})").find(cleanPara)
+                        val extractedBaseTime = baseTimeMatch?.groupValues?.get(1)?.padStart(5, '0') ?: timesFound.firstOrNull() ?: "—"
+                        
+                        val afishaT = afishaMap[trainNum]?.stationTimes?.get(st) ?: extractedBaseTime
+
+                        val rawTgT = stationDepTimes[st] ?: afishaT
+                        val tgT = if (isCanceled) {
+                            val t = if (afishaT != "—") afishaT else if (rawTgT != "—") rawTgT else ""
+                            if (t.isNotEmpty()) "$t ОТМЕНА" else "ОТМЕНА"
+                        } else {
+                            rawTgT
+                        }
                         
                         val routeStr = when {
                             cleanPara.contains("Ипподром", true) || cleanPara.contains("47 км", true) -> if (isToMsk) "до Ипподрома (47 км)" else "до Крюково"
@@ -657,9 +685,9 @@ object FileParsers {
                             if (afishaT != "—") "№$trainNum $routeStr отправлением в $afishaT - ОТМЕНЕН"
                             else "№$trainNum $routeStr - ОТМЕНЕН"
                         } else {
-                            val base = if (afishaT != "—" && tgT != "—") {
-                                if (afishaT == tgT) "№$trainNum $routeStr отправлением в $afishaT"
-                                else "№$trainNum $routeStr отправлением в $afishaT - отправится в $tgT"
+                            val base = if (afishaT != "—" && rawTgT != "—") {
+                                if (afishaT == rawTgT) "№$trainNum $routeStr отправлением в $afishaT"
+                                else "№$trainNum $routeStr отправлением в $afishaT - отправится в $rawTgT"
                             } else if (afishaT != "—") {
                                 "№$trainNum $routeStr отправлением в $afishaT"
                             } else {
@@ -730,7 +758,7 @@ object FileParsers {
         val stationHeaderRegex = Regex("(?i)^\\s*([А-Яа-яЁё\\-\\s123]+?)\\s+Изменения\\s+в\\s+графике")
         val standaloneStationRegex = Regex("(?i)^\\s*(?:Станция|ст\\.)?\\s*([А-Яа-яЁё\\-1]+)\\s*$")
         val dateLineRegex = Regex("(?i)^\\s*(\\d{1,2}(?:\\s*,\\s*\\d{1,2})*)\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\\s*$")
-        val trainNumberRegex = Regex("№\\s*([67]\\d{3}(?:/[67]\\d{3})?)")
+        val trainNumberRegex = Regex("№\\s*([1-7]\\d{2,3}(?:/[1-7]\\d{2,3})?)")
 
         val paragraphs = mutableListOf<String>()
         var currentPara = ""
@@ -806,8 +834,19 @@ object FileParsers {
                 if (currentStation == "Левобережная" && !isToMsk) continue
 
                 val timesFound = Regex("(\\d{1,2}:\\d{2})").findAll(cleanParagraph).map { it.groupValues[1].padStart(5, '0') }.toList()
-                val afishaT = timesFound.firstOrNull() ?: (afishaMap[trNum]?.stationTimes?.get(currentStation) ?: "—")
-                val expT = if (isCanceled) "ОТМЕНЕН" else if (timesFound.size >= 2) timesFound.last() else if (timesFound.size == 1) timesFound.first() else "—"
+                val baseTimeMatch = Regex("(?i)отправлением\\s+в\\s+(\\d{1,2}:\\d{2})").find(cleanParagraph)
+                val extractedBaseTime = baseTimeMatch?.groupValues?.get(1)?.padStart(5, '0') ?: timesFound.firstOrNull() ?: "—"
+                val afishaT = afishaMap[trNum]?.stationTimes?.get(currentStation) ?: extractedBaseTime
+                
+                val rawExpT = if (timesFound.size >= 2) timesFound.last() else if (timesFound.size == 1) timesFound.first() else afishaT
+                
+                val expT = if (isCanceled) {
+                    val t = if (afishaT != "—") afishaT else if (rawExpT != "—") rawExpT else ""
+                    if (t.isNotEmpty()) "$t ОТМЕНА" else "ОТМЕНА"
+                } else {
+                    rawExpT
+                }
+                
                 val routeStr = when {
                     cleanParagraph.contains("Ипподром", true) || cleanParagraph.contains("47 км", true) -> if (isToMsk) "до Ипподрома (47 км)" else "до Крюково"
                     cleanParagraph.contains("Крюково", true) && !isToMsk -> "до Крюково"
@@ -845,7 +884,7 @@ object FileParsers {
     fun parseYandexPdf(file: File): List<YandexParsedTrain> {
         val text = readSmartTextFile(file)
         val parsed = mutableListOf<YandexParsedTrain>()
-        val lineRegex = Regex("([67]\\d{3}(?:/[67]\\d{3})?).*?(\\d{1,2}:\\d{2})")
+        val lineRegex = Regex("([1-7]\\d{2,3}(?:/[1-7]\\d{2,3})?).*?(\\d{1,2}:\\d{2})")
         for (line in text.lines()) {
             val m = lineRegex.find(line) ?: continue
             val trNum = m.groupValues[1]
@@ -892,11 +931,7 @@ object WordCancelGenerator {
                 if (filteredRows.isEmpty()) continue
 
                 val sortedLines = filteredRows.sortedBy { row ->
-                    val timeStr = if (row.afishaTime != "—") row.afishaTime 
-                                  else if (row.exportTime != "—" && row.exportTime != "ОТМЕНЕН") row.exportTime
-                                  else if (row.telegramTime != "—" && row.telegramTime != "ОТМЕНЕН") row.telegramTime
-                                  else "99:99"
-                    parseTrainTimeForSorting(timeStr)
+                    parseTrainTimeForSorting(getBaseTimeForSorting(row))
                 }.map { it.wordExportLine.trim() }.distinct()
 
                 dateToCleanLines[dateStr] = sortedLines
@@ -1363,15 +1398,15 @@ fun TrainTableSection(activeStation: String, directionTab: DirectionTab, onDirec
                 Text("№ ПОЕЗДА", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.1f))
                 Text("МАРШРУТ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.3f))
                 Text("АФИША", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(0.7f))
-                Text("ТЕЛЕГР.", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(0.7f))
+                Text("ТЕЛЕГР.", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(0.8f))
                 Text("ВЫГРУЗКА", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(0.8f))
-                Text("ИЗМЕНЕНИЯ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(2.5f))
+                Text("ИЗМЕНЕНИЯ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(2.3f))
                 Text("СВЕРКА", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.1f))
             }
             if (rows.isEmpty()) { Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Нет данных об изменениях по станции «$activeStation».", color = TrainRTheme.TextSub, fontSize = 14.sp) }
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(rows.sortedBy { parseTrainTimeForSorting(if (it.afishaTime != "—") it.afishaTime else it.telegramTime) }, key = { it.id }) { row ->
+                    items(rows.sortedBy { parseTrainTimeForSorting(getBaseTimeForSorting(it)) }, key = { it.id }) { row ->
                         Row(modifier = Modifier.fillMaxWidth().background(if (row.globalErrorNote != null) TrainRTheme.RedCancel.copy(alpha = 0.14f) else if (row.isCanceled) TrainRTheme.RedCancel.copy(alpha = 0.06f) else Color.White).clickable { onRowClick(row) }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(row.dateStr, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TrainRTheme.TextDark, modifier = Modifier.weight(0.9f))
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1.1f)) {
@@ -1380,9 +1415,13 @@ fun TrainTableSection(activeStation: String, directionTab: DirectionTab, onDirec
                             }
                             Text(row.route, fontSize = 12.sp, color = TrainRTheme.TextDark, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1.3f))
                             Text(row.afishaTime, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = TrainRTheme.TextSub, modifier = Modifier.weight(0.7f))
-                            Text(row.telegramTime, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = if (row.isCanceled) TrainRTheme.RedCancel else TrainRTheme.GreenSuccess, modifier = Modifier.weight(0.7f))
-                            Text(row.exportTime, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = TrainRTheme.TextSub, modifier = Modifier.weight(0.8f))
-                            Column(modifier = Modifier.weight(2.5f).padding(end = 8.dp)) {
+                            
+                            val isTgCanceled = row.isCanceled || row.telegramTime.contains("ОТМЕН", true)
+                            val isExpCanceled = row.isCanceled || row.exportTime.contains("ОТМЕН", true)
+                            
+                            Text(row.telegramTime, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = if (isTgCanceled) TrainRTheme.RedCancel else TrainRTheme.GreenSuccess, modifier = Modifier.weight(0.8f))
+                            Text(row.exportTime, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = if (isExpCanceled) TrainRTheme.RedCancel else TrainRTheme.TextSub, modifier = Modifier.weight(0.8f))
+                            Column(modifier = Modifier.weight(2.3f).padding(end = 8.dp)) {
                                 Text(row.actualChangesText, fontSize = 12.sp, color = TrainRTheme.TextDark)
                                 if (row.globalErrorNote != null) Text(row.globalErrorNote, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TrainRTheme.RedCancel)
                             }
