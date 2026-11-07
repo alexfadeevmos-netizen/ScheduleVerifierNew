@@ -640,7 +640,7 @@ object FileParsers {
                                 addedStops = addedStops,
                                 globalErrorNote = closedStationError,
                                 rawTelegramSnippet = cleanPara,
-                                auditStatus = evaluateFourWayAuditStatus(afishaTime, tgT, tgT, "—", isCanceled, skippedStops, closedStationError)
+                                auditStatus = evaluateFourWayAuditStatus(afishaT, tgT, tgT, "—", isCanceled, skippedStops, closedStationError)
                             )
                             rawRowsByStationDate.getOrPut(st) { mutableMapOf() }.getOrPut(dateKey) { mutableListOf() }.add(rowObj)
                         }
