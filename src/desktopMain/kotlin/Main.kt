@@ -396,7 +396,6 @@ fun mergeSameTrainRowsForDay(rows: List<TrainChangeRow>): List<TrainChangeRow> {
             val mergedRawTg = sameTrains.map { it.rawTelegramSnippet }.filter { it.isNotBlank() }.distinct().joinToString("\n---\n")
             val mergedRawExp = sameTrains.map { it.rawExportSnippet }.filter { it.isNotBlank() }.distinct().joinToString("\n---\n")
             
-            // Если есть данные из выгрузки, берем итоговую строку для Word строго из выгрузки
             val exportRow = sameTrains.find { it.rawExportSnippet.isNotBlank() }
             val mergedWordLine = exportRow?.wordExportLine?.takeIf { it.isNotBlank() } 
                 ?: sameTrains.map { it.wordExportLine.trim() }.filter { it.isNotEmpty() }.maxByOrNull { it.length } ?: ""
@@ -805,8 +804,8 @@ object FileParsers {
         var currentStation = "Крюково"
         var currentDate = "19 октября"
         
-        val stationHeaderRegex = Regex("(?i)^\\s*([А-Яа-яЁё\\-\\s123]+?)\\s+Изменения\\s+в\\s+графике")
-        val standaloneStationRegex = Regex("(?i)^\\s*(?:Станция|ст\\.)?\\s*([А-Яа-яЁё\\-1]+)\\s*$")
+        val stationHeaderRegex = Regex("(?i)^\\s*([А-Яа-яЁё\\-\\s\\d.]+?)\\s+Изменения\\s+в\\s+графике")
+        val standaloneStationRegex = Regex("(?i)^\\s*(?:Станция|ст\\.)?\\s*([А-Яа-яЁё\\-\\s\\d.]+)\\s*$")
         val dateLineRegex = Regex("(?i)^\\s*(\\d{1,2}(?:\\s*,\\s*\\d{1,2})*)\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\\s*$")
         val trainNumberRegex = Regex("№\\s*([1-7]\\d{2,3}(?:/[1-7]\\d{2,3})?)")
 
@@ -817,12 +816,29 @@ object FileParsers {
             if (trimmed.isEmpty()) continue
             if (Regex("(?i)(прибытием\\s+в|прибывает\\s+в|прибудет\\s+в)").containsMatchIn(trimmed)) continue
 
-            if (stationHeaderRegex.containsMatchIn(trimmed) || standaloneStationRegex.matches(trimmed) || dateLineRegex.matches(trimmed)) {
+            val stHeaderMatch = stationHeaderRegex.find(trimmed)
+            if (stHeaderMatch != null && PolygonConfig.normalizeStationName(stHeaderMatch.groupValues[1]) in PolygonConfig.ALL_STATIONS) {
                 if (currentPara.isNotEmpty()) paragraphs.add(currentPara)
                 paragraphs.add(trimmed)
                 currentPara = ""
                 continue
             }
+            
+            val stSoloMatch = standaloneStationRegex.find(trimmed)
+            if (stSoloMatch != null && PolygonConfig.normalizeStationName(stSoloMatch.groupValues[1]) in PolygonConfig.ALL_STATIONS) {
+                if (currentPara.isNotEmpty()) paragraphs.add(currentPara)
+                paragraphs.add(trimmed)
+                currentPara = ""
+                continue
+            }
+
+            if (dateLineRegex.matches(trimmed)) {
+                if (currentPara.isNotEmpty()) paragraphs.add(currentPara)
+                paragraphs.add(trimmed)
+                currentPara = ""
+                continue
+            }
+            
             if (trainNumberRegex.containsMatchIn(trimmed)) {
                 if (currentPara.isNotEmpty()) paragraphs.add(currentPara)
                 currentPara = trimmed
@@ -918,8 +934,6 @@ object FileParsers {
                     else -> if (isToMsk) "до Москвы" else "из Москвы"
                 }
                 
-                // Для выгрузки ПЕРЕСОБИРАЕМ строку с использованием isFutureStop, 
-                // чтобы удалить пройденные станции
                 val finalSkippedForNote = validSkippedStops.filter { it != currentStation && isFutureStop(currentStation, it, isToMsk) }
                 val finalAddedForNote = addedStops.filter { it != currentStation && isFutureStop(currentStation, it, isToMsk) }
                 val remNoteWord = buildRemainingStopsNote(finalSkippedForNote, finalAddedForNote, false, isCanceledAtThisStation, "", forWord = true)
