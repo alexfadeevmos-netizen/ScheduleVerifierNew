@@ -355,8 +355,9 @@ fun parseTrainTimeForSorting(timeStr: String): Int {
     val hours = m.groupValues[1].toInt()
     val minutes = m.groupValues[2].toInt()
     
-    // СУТКИ С 00:00 ДО 23:59: Убрано прибавление +24 часов, чтобы ночные поезда шли в самом начале.
-    return hours * 60 + minutes
+    // СУТКИ НА ЖД: Поезда с 00:00 до 03:59 относятся к КОНЦУ предыдущих суток, а не к началу текущих.
+    val adjustedHours = if (hours in 0..3) hours + 24 else hours
+    return adjustedHours * 60 + minutes
 }
 
 fun getSortingTime(row: TrainChangeRow): Int {
@@ -737,9 +738,6 @@ object FileParsers {
                 val stationDepTimes = mutableMapOf<String, String>()
                 val stopMatches = timePairRegex.findAll(cleanPara).toList()
                 
-                val sampleTrainForDir = trainMatches.firstOrNull() ?: ""
-                val isToMskSample = PolygonConfig.isTrainToMoscow(sampleTrainForDir, cleanPara)
-
                 for ((idx, sm) in stopMatches.withIndex()) {
                     val rawSt = sm.groupValues[1].trim()
                     val stName = PolygonConfig.normalizeStationName(rawSt)
@@ -750,7 +748,7 @@ object FileParsers {
                     val isTech = cleanPara.contains("тех. стоянка", true) || cleanPara.contains("стоянка техническая", true) || cleanPara.contains("без пассажиров", true)
 
                     val isClosedSt = PolygonConfig.HARD_CLOSED_STATIONS.contains(stName) || 
-                                     (stName == "Левобережная" && !isToMskSample)
+                                     (stName == "Левобережная" && !PolygonConfig.isTrainToMoscow(trainNum))
                                      
                     if (isClarification) {
                         if (cleanPara.contains("посадка", true)) addedStops.add(stName)
