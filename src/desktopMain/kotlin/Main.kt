@@ -355,19 +355,15 @@ fun parseTrainTimeForSorting(timeStr: String): Int {
     val hours = m.groupValues[1].toInt()
     val minutes = m.groupValues[2].toInt()
     
-    val adjustedHours = if (hours in 0..3) hours + 24 else hours
-    return adjustedHours * 60 + minutes
+    // СУТКИ С 00:00 ДО 23:59: Убрано прибавление +24 часов, чтобы ночные поезда шли в самом начале.
+    return hours * 60 + minutes
 }
 
 fun getSortingTime(row: TrainChangeRow): Int {
-    val actualRegex = Regex("(?i)отправится\\s+в\\s+(\\d{1,2}:\\d{2})")
-    val actualMatch = actualRegex.find(row.wordExportLine) ?: actualRegex.find(row.actualChangesText)
-    if (actualMatch != null) {
-        return parseTrainTimeForSorting(actualMatch.groupValues[1])
-    }
-    
+    // СОРТИРОВКА СТРОГО ПО ИСХОДНОМУ (БАЗОВОМУ) РАСПИСАНИЮ, ИГНОРИРУЯ ВРЕМЯ ФАКТИЧЕСКОГО ОТПРАВЛЕНИЯ
     val baseRegex = Regex("(?i)отправлением\\s+в\\s+(\\d{1,2}:\\d{2})")
     val baseMatch = baseRegex.find(row.wordExportLine) ?: baseRegex.find(row.actualChangesText)
+    
     if (baseMatch != null) {
         return parseTrainTimeForSorting(baseMatch.groupValues[1])
     }
