@@ -174,7 +174,7 @@ object PolygonConfig {
         "Поваровка", "Поварово-1", "Берёзки-Дачные", "Подсолнечная", "Сенеж",
         "Покровка", "Фроловское", "Стреглово", "Клин", "Ямуга", "Решетниково",
         "Завидово", "Московское Море", "Редкино", "Межево", "Кузьминка",
-        "Чуприяновка", "Лазурная", "Тверь", "Конаково ГРЭС"
+        "Чуприяновка", "Лазурная", "Тверь", "Конаково ГРЭС", "Донховка", "Конаковский Мох", "Путепроводная"
     )
 
     val MCD3_STATIONS: Set<String> = setOf(
@@ -195,6 +195,8 @@ object PolygonConfig {
             .replace("Москва-Пасс.-Октябрьская", "Москва", ignoreCase = true)
             .replace("Ленинградский вокзал", "Москва", ignoreCase = true)
             .replace("Оп Подрезково", "Подрезково", ignoreCase = true)
+            .replace("Бологое-Моск.", "Бологое", ignoreCase = true)
+            .replace("Москва-окт", "Москва", ignoreCase = true)
         return ALL_STATIONS.firstOrNull { it.equals(clean, ignoreCase = true) } ?: clean
     }
 
@@ -202,7 +204,7 @@ object PolygonConfig {
         if (route.contains("Ипподром", ignoreCase = true) || route.contains("до Москвы", ignoreCase = true) || route.contains("на Москву", ignoreCase = true) || route.contains("47 км", ignoreCase = true)) {
             return true
         }
-        if (route.contains("до Крюково", ignoreCase = true) || route.contains("из Москвы", ignoreCase = true) || route.contains("от Москвы", ignoreCase = true) || route.contains("до Твери", ignoreCase = true) || route.contains("до Клина", ignoreCase = true)) {
+        if (route.contains("до Крюково", ignoreCase = true) || route.contains("из Москвы", ignoreCase = true) || route.contains("от Москвы", ignoreCase = true) || route.contains("до Твери", ignoreCase = true) || route.contains("до Клина", ignoreCase = true) || route.contains("до Решетниково", ignoreCase = true) || route.contains("до Конаково", ignoreCase = true) || route.contains("до Подсолнечной", ignoreCase = true) || route.contains("до Сходни", ignoreCase = true)) {
             return false
         }
         val firstPart = trainNumber.split("/").firstOrNull()?.trim() ?: trainNumber
@@ -826,10 +828,9 @@ object FileParsers {
         }
 
         var currentStation = ""
-        var currentDate = "19 октября"
+        var currentDates = mutableListOf("19 октября")
         
-        val stationHeaderRegex = Regex("^\\s*([А-Яа-яЁё\\-\\s\\d.]+?)\\s+Изменения\\s+в\\s+графике", RegexOption.IGNORE_CASE)
-        val standaloneStationRegex = Regex("^\\s*(?:Станция|ст\\.)?\\s*([А-Яа-яЁё\\-\\s\\d.]+)\\s*$", RegexOption.IGNORE_CASE)
+        val stationHeaderRegex = Regex("^\\s*([А-Яа-яЁё\\-\\s\\d.]+?)\\s*$", RegexOption.IGNORE_CASE)
         val dateLineRegex = Regex("^\\s*(\\d{1,2}(?:\\s*,\\s*\\d{1,2})*)\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\\s*$", RegexOption.IGNORE_CASE)
         val dateLineRegexNum = Regex("^\\s*(\\d{1,2}(?:\\s*,\\s*\\d{1,2})*)\\.(\\d{2})(?:\\.\\d{2,4})?\\s*$")
         val trainNumberRegex = Regex("№\\s*([1-7]\\d{2,3}(?:/[1-7]\\d{2,3})?)")
@@ -841,15 +842,7 @@ object FileParsers {
             if (trimmed.isEmpty()) continue
             if (Regex("(прибытием\\s+в|прибывает\\s+в|прибудет\\s+в)", RegexOption.IGNORE_CASE).containsMatchIn(trimmed)) continue
 
-            val stHeaderMatch = stationHeaderRegex.find(trimmed)
-            if (stHeaderMatch != null && PolygonConfig.normalizeStationName(stHeaderMatch.groupValues[1]) in PolygonConfig.ALL_STATIONS) {
-                if (currentPara.isNotEmpty()) paragraphs.add(currentPara)
-                paragraphs.add(trimmed)
-                currentPara = ""
-                continue
-            }
-            
-            val stSoloMatch = standaloneStationRegex.find(trimmed)
+            val stSoloMatch = stationHeaderRegex.find(trimmed)
             if (stSoloMatch != null && PolygonConfig.normalizeStationName(stSoloMatch.groupValues[1]) in PolygonConfig.ALL_STATIONS) {
                 if (currentPara.isNotEmpty()) paragraphs.add(currentPara)
                 paragraphs.add(trimmed)
@@ -877,7 +870,6 @@ object FileParsers {
 
         for (paragraph in paragraphs) {
             var cleanParagraph = paragraph.replace(Regex("[.\\s]*Изменений\\s*нет\\.?", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("Бологое[- ]*Моск(?:овское)?\\.?", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("\\.{2,}"), ".")
                 .replace(Regex("\\s{2,}"), " ")
                 .trim()
@@ -890,21 +882,22 @@ object FileParsers {
                 isGlobalCancelMode = false
             }
 
-            val stHeaderMatch = stationHeaderRegex.find(cleanParagraph)
-            if (stHeaderMatch != null) {
-                PolygonConfig.normalizeStationName(stHeaderMatch.groupValues[1]).takeIf { it in PolygonConfig.ALL_STATIONS }?.let { currentStation = it }
-                continue
-            }
-            val stSoloMatch = standaloneStationRegex.find(cleanParagraph)
+            val stSoloMatch = stationHeaderRegex.find(cleanParagraph)
             if (stSoloMatch != null) {
-                PolygonConfig.normalizeStationName(stSoloMatch.groupValues[1]).takeIf { it in PolygonConfig.ALL_STATIONS }?.let { currentStation = it }
-                continue
+                val potentialStation = PolygonConfig.normalizeStationName(stSoloMatch.groupValues[1])
+                if (potentialStation in PolygonConfig.ALL_STATIONS) {
+                    currentStation = potentialStation
+                    continue
+                }
             }
+            
             val dtMatch = dateLineRegex.find(cleanParagraph)
             if (dtMatch != null) {
                 val daysList = dtMatch.groupValues[1].split(",").map { it.trim() }.filter { it.isNotEmpty() }
                 val monthName = dtMatch.groupValues[2].lowercase(Locale.getDefault())
-                if (daysList.isNotEmpty()) currentDate = "${daysList.first()} $monthName"
+                if (daysList.isNotEmpty()) {
+                    currentDates = daysList.map { "$it $monthName" }.toMutableList()
+                }
                 continue
             }
 
@@ -912,7 +905,9 @@ object FileParsers {
             if (dtNumMatch != null) {
                 val daysList = dtNumMatch.groupValues[1].split(",").map { it.trim() }.filter { it.isNotEmpty() }
                 val monthName = getMonthNameGenitive(dtNumMatch.groupValues[2])
-                if (daysList.isNotEmpty()) currentDate = "${daysList.first()} $monthName"
+                if (daysList.isNotEmpty()) {
+                    currentDates = daysList.map { "$it $monthName" }.toMutableList()
+                }
                 continue
             }
 
@@ -970,14 +965,16 @@ object FileParsers {
                     wordText = "$wordText - ОТМЕНЕН"
                 }
 
-                val row = TrainChangeRow(
-                    id = "${currentDate}_${currentStation}_${trNum}_${System.nanoTime()}",
-                    dateStr = currentDate, station = currentStation, trainNumber = trNum, isToMoscow = isToMsk,
-                    isMcd = PolygonConfig.isMcdTrain(trNum, cleanParagraph), isExpress = PolygonConfig.isExpressTrain(trNum, cleanParagraph), route = "Выгрузка маршрут",
-                    telegramBasis = "Выгрузка (${file.name})", afishaTime = afishaT, telegramTime = expT, exportTime = expT, yandexTime = "—",
-                    actualChangesText = cleanParagraph, wordExportLine = wordText, isCanceled = isCanceledAtThisStation, isPartialCancel = hasNewRoute, isAppointed = isAppointed, rawTelegramSnippet = "", rawExportSnippet = cleanParagraph
-                )
-                mutableResult.getOrPut(currentStation) { mutableMapOf() }.getOrPut(currentDate) { mutableListOf() }.add(row)
+                for(currentDate in currentDates) {
+                    val row = TrainChangeRow(
+                        id = "${currentDate}_${currentStation}_${trNum}_${System.nanoTime()}",
+                        dateStr = currentDate, station = currentStation, trainNumber = trNum, isToMoscow = isToMsk,
+                        isMcd = PolygonConfig.isMcdTrain(trNum, cleanParagraph), isExpress = PolygonConfig.isExpressTrain(trNum, cleanParagraph), route = "Выгрузка маршрут",
+                        telegramBasis = "Выгрузка (${file.name})", afishaTime = afishaT, telegramTime = expT, exportTime = expT, yandexTime = "—",
+                        actualChangesText = cleanParagraph, wordExportLine = wordText, isCanceled = isCanceledAtThisStation, isPartialCancel = hasNewRoute, isAppointed = isAppointed, rawTelegramSnippet = "", rawExportSnippet = cleanParagraph
+                    )
+                    mutableResult.getOrPut(currentStation) { mutableMapOf() }.getOrPut(currentDate) { mutableListOf() }.add(row)
+                }
             }
         }
 
