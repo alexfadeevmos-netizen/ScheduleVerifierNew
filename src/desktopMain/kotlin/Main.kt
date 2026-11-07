@@ -1078,9 +1078,34 @@ object WordCancelGenerator {
     private val arrivalExcludeRegex = Regex("(прибытием\\s+в|прибывает\\s+в|прибудет\\s+в)", RegexOption.IGNORE_CASE)
     private val nightNoteRegex = Regex("\\s*\\(в\\s+ночь\\s+на\\s+[^)]+\\)", RegexOption.IGNORE_CASE)
 
-    fun getDirectionSubtitle(station: String, isToMoscow: Boolean): String = if (isToMoscow) {
-        if (station in PolygonConfig.MCD3_STATIONS) "на Ленинградский вокзал, Ипподром" else "на Москву"
-    } else "от Москвы"
+    private fun isTerminalStationForTrain(station: String, row: TrainChangeRow): Boolean {
+        val text = row.wordExportLine
+        if (text.contains("прибытием", ignoreCase = true) || text.contains("прибывает", ignoreCase = true) || text.contains("прибудет", ignoreCase = true)) return true
+        
+        val destPattern = Regex("(?i)№\\s*[\\d/]+\\s+(?:из\\s+[А-Яа-яЁё\\-]+\\s+)?до\\s+([А-Яа-яЁё\\-]+)")
+        val match = destPattern.find(text) ?: destPattern.find(row.route)
+        
+        if (match != null) {
+            val dest = match.groupValues[1].lowercase()
+            return when (station) {
+                "Москва" -> dest.startsWith("москв")
+                "Клин" -> dest.startsWith("клин")
+                "Тверь" -> dest.startsWith("твер")
+                "Сходня" -> dest.startsWith("сходн")
+                "Подсолнечная" -> dest.startsWith("подсолнечн")
+                "Решетниково" -> dest.startsWith("решетников")
+                "Крюково", "Зеленоград-Крюково" -> dest.startsWith("крюков")
+                "Конаково ГРЭС" -> dest.startsWith("конаков")
+                "Ипподром" -> dest.startsWith("ипподром")
+                else -> dest.startsWith(station.lowercase().take(5))
+            }
+        }
+        return false
+    }
+
+    fun getDirectionSubtitle(isToMoscow: Boolean): String = if (isToMoscow) {
+        "на Москву / Ипподром"
+    } else "от Москвы / Ипподрома"
 
     fun generateStationWordFiles(selectedStations: Set<String>, selectedDates: Set<String>, directionTab: DirectionTab, allData: StationDateTrainMap): Pair<Int, File> {
         val desktopDir = File(System.getProperty("user.home"), "Desktop")
@@ -1102,7 +1127,7 @@ object WordCancelGenerator {
             for (dateStr in datesToProcess) {
                 val trainMap = stationDateMap[dateStr] ?: continue
                 val filteredRows = trainMap.values
-                    .filter { it.isToMoscow == isToMoscow && !arrivalExcludeRegex.containsMatchIn(it.wordExportLine) && !arrivalExcludeRegex.containsMatchIn(it.actualChangesText) }
+                    .filter { it.isToMoscow == isToMoscow && !arrivalExcludeRegex.containsMatchIn(it.wordExportLine) && !arrivalExcludeRegex.containsMatchIn(it.actualChangesText) && !isTerminalStationForTrain(station, it) }
                 if (filteredRows.isEmpty()) continue
 
                 val sortedLines = filteredRows.sortedBy { row ->
@@ -1115,11 +1140,11 @@ object WordCancelGenerator {
             }
 
             if (signatureToDates.isEmpty()) continue
-            val fileNameSuffix = if (isToMoscow) "на Москву" else "от Москвы"
+            val fileNameSuffix = if (isToMoscow) "на Москву, Ипподром" else "от Москвы, Ипподрома"
             val outFile = File(targetFolder, "$station $fileNameSuffix.docx")
 
             XWPFDocument().use { doc ->
-                val subtitle = getDirectionSubtitle(station, isToMoscow)
+                val subtitle = getDirectionSubtitle(isToMoscow)
                 addCenteredBoldHeader(doc, "$station  Изменения в графике движения эл/поездов")
                 addCenteredBoldHeader(doc, subtitle)
                 var currentPageLineCount = 2
@@ -1214,7 +1239,6 @@ object WordCancelGenerator {
         }
     }
 }
-
 // ============================================================================
 // 7. UI КОМПОНЕНТЫ
 // ============================================================================
