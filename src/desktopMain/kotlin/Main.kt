@@ -45,6 +45,7 @@ import org.apache.pdfbox.text.PDFTextStripper
 import org.apache.poi.ss.usermodel.CellType
 import org.apache.poi.ss.usermodel.DateUtil
 import org.apache.poi.ss.usermodel.WorkbookFactory
+import org.apache.poi.xwpf.usermodel.LineSpacingRule
 import org.apache.poi.xwpf.usermodel.ParagraphAlignment
 import org.apache.poi.xwpf.usermodel.XWPFDocument
 import java.io.File
@@ -1192,6 +1193,70 @@ fun TrainRApp() {
 
     if (showCalendarDialog) CalendarGridPickerDialog(allDatesWithChanges, selectedFilterDates, { dt -> selectedFilterDates = if (dt in selectedFilterDates) selectedFilterDates - dt else selectedFilterDates + dt }, { selectedFilterDates = emptySet() }, { showCalendarDialog = false })
     selectedTrainForDossier?.let { TrainDossierDialog(it) { selectedTrainForDossier = null } }
+}
+
+@Composable
+fun TopBarLoadButton(
+    label: String,
+    count: Int,
+    badgeColor: Color,
+    onClick: () -> Unit
+) {
+    OutlinedButton(
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, TrainRTheme.BorderCol),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.Add,
+            contentDescription = label,
+            tint = TrainRTheme.TextDark,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = label,
+            color = TrainRTheme.TextDark,
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Surface(
+            color = badgeColor,
+            shape = RoundedCornerShape(10.dp)
+        ) {
+            Text(
+                text = count.toString(),
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun FilterChipItem(
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        color = if (isSelected) TrainRTheme.NavyDark else Color.White,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, if (isSelected) TrainRTheme.NavyDark else TrainRTheme.BorderCol),
+        modifier = Modifier.clickable { onClick() }
+    ) {
+        Text(
+            text = label,
+            color = if (isSelected) Color.White else TrainRTheme.TextDark,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+        )
+    }
 }
 
 @Composable
