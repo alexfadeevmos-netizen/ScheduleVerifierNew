@@ -618,7 +618,13 @@ object FileParsers {
                 val localCancel = Regex("(?i)(?:^|[^а-яА-ЯёЁ])(отменяется|отмен[её]н|отменить)(?:[^а-яА-ЯёЁ]|$)").containsMatchIn(cleanPara) && 
                                   !Regex("(?i)отменен[а-я]*\\s*остановк").containsMatchIn(cleanPara) &&
                                   !Regex("(?i)без\\s+остановк").containsMatchIn(cleanPara)
-                val isCanceled = isGlobalCancelMode || localCancel
+                
+                // ИСПРАВЛЕНИЕ: Добавлен детект отмены, если нет "отправится в" и нет остановок (для телеграмм)
+                val hasNewTime = Regex("(?i)отправится\\s+в").containsMatchIn(cleanPara)
+                val hasStops = Regex("(?i)(?:отменен[ыа-я]*|назначен[ыа-я]*|без)\\s*останов[ок]").containsMatchIn(cleanPara)
+                val isImplicitCancel = !hasNewTime && !hasStops && !cleanPara.contains("назначается", true)
+
+                val isCanceled = isGlobalCancelMode || localCancel || isImplicitCancel
                 val isAppointed = cleanPara.contains("назначается", true) || cleanPara.contains("назначить", true)
 
                 val closedStationError = PolygonConfig.HARD_CLOSED_STATIONS.firstOrNull { 
@@ -720,7 +726,6 @@ object FileParsers {
                             else -> "Поезд №$trainNum" + (if (tgT != "—") " отпр. в $tgT" else "") + (if (remNoteUI.isNotEmpty()) " ($remNoteUI)" else "")
                         }
 
-                        // ИСПРАВЛЕНИЕ 2: Явное добавление слова "ОТМЕНЕН"
                         val wordText = if (isCanceledAtThisStation) {
                             if (afishaT != "—") "№$trainNum $routeStr отправлением в $afishaT - ОТМЕНЕН"
                             else "№$trainNum $routeStr - ОТМЕНЕН"
@@ -863,26 +868,20 @@ object FileParsers {
             val localCancel = Regex("(?i)(?:^|[^а-яА-ЯёЁ])(отменяется|отмен[её]н|отменить)(?:[^а-яА-ЯёЁ]|$)").containsMatchIn(cleanParagraph) && 
                               !Regex("(?i)отменен[а-я]*\\s+остановк").containsMatchIn(cleanParagraph) &&
                               !Regex("(?i)без\\s+остановк").containsMatchIn(cleanParagraph)
-                             
-            val isCanceled = isGlobalCancelMode || localCancel
+            
+            // ИСПРАВЛЕНИЕ: Детект отмены в выгрузках (одно время без "отправится в" и без остановок)
+            val hasNewTime = Regex("(?i)отправится\\s+в").containsMatchIn(cleanParagraph)
+            val hasStops = Regex("(?i)(?:отменен[ыа-я]*|назначен[ыа-я]*|без)\\s*останов[ок]").containsMatchIn(cleanParagraph)
+            val isImplicitCancel = !hasNewTime && !hasStops && !cleanParagraph.contains("назначается", true)
+
+            val isCanceled = isGlobalCancelMode || localCancel || isImplicitCancel
             val isAppointed = cleanParagraph.contains("назначается", true)
             
             cleanParagraph = cleanParagraph.replace(Regex("(?i)\\s*\\(приб\\.?\\s*\\d{1,2}:\\d{2}\\)"), "").trim()
 
-            val skippedStops = mutableListOf<String>()
-            skippedStops.addAll(extractStationsByRegex(cleanParagraph, "(?i)отменен[ыа-я]*\\s*остановк[иа]?\\s*:?\\s*([^.;(]+)"))
-            skippedStops.addAll(extractStationsByRegex(cleanParagraph, "(?i)без\\s*останов[ок]+\\s*:?\\s*([^.;(]+)"))
-            
-            val validSkippedStops = skippedStops.filter { it !in PolygonConfig.HARD_CLOSED_STATIONS }
-            val addedStops = extractStationsByRegex(cleanParagraph, "(?i)назначен[ыа-я]*\\s*остановк[иа]?\\s*:?\\s*([^.;(]+)").filter { it !in PolygonConfig.HARD_CLOSED_STATIONS }
-
             for (trNum in trainMatches) {
                 val isToMsk = PolygonConfig.isTrainToMoscow(trNum, cleanParagraph)
-                if (currentStation == "Левобережная" && !isToMsk) continue
-
-                val isSkippedHere = currentStation in skippedStops
-                val isCanceledAtThisStation = isCanceled || isSkippedHere
-
+                
                 val timesFound = Regex("(\\d{1,2}:\\d{2})").findAll(cleanParagraph).map { it.groupValues[1].padStart(5, '0') }.toList()
                 val baseTimeMatch = Regex("(?i)отправлением\\s+в\\s+(\\d{1,2}:\\d{2})").find(cleanParagraph)
                 val extractedBaseTime = baseTimeMatch?.groupValues?.get(1)?.padStart(5, '0') ?: timesFound.firstOrNull() ?: "—"
@@ -890,7 +889,7 @@ object FileParsers {
                 
                 val rawExpT = if (timesFound.size >= 2) timesFound.last() else if (timesFound.size == 1) timesFound.first() else afishaT
                 
-                val expT = if (isCanceledAtThisStation) {
+                val expT = if (isCanceled) {
                     val t = if (afishaT != "—") afishaT else if (rawExpT != "—") rawExpT else ""
                     if (t.isNotEmpty()) "$t ОТМЕНА" else "ОТМЕНА"
                 } else {
@@ -904,27 +903,13 @@ object FileParsers {
                     else -> if (isToMsk) "до Москвы" else "из Москвы"
                 }
                 
-                // ИСПРАВЛЕНИЕ 1: Оставляем ВСЕ станции из оригинальной выгрузки для колонки ИЗМЕНЕНИЯ,
-                // так как в выгрузках (текстовых файлах) фильтрация по пройденным станциям УЖЕ была сделана
-                // на этапе составления этого текстового файла.
-                // Если мы применим isFutureStop к выгрузке, мы случайно удалим станции, 
-                // если программа неправильно определит "текущее" местоположение.
-                val remNoteWord = buildRemainingStopsNote(validSkippedStops, addedStops, false, isCanceledAtThisStation, "", forWord = true)
-
-                // ИСПРАВЛЕНИЕ 2: Явное добавление слова "ОТМЕНЕН"
-                val wordText = if (isCanceledAtThisStation) {
+                // ИСПРАВЛЕНИЕ: Мы не пересобираем фразу из выгрузки, а вставляем ОТМЕНЕН к базовому тексту, если это отмена
+                val wordText = if (isCanceled) {
                     if (afishaT != "—") "№$trNum $routeStr отправлением в $afishaT - ОТМЕНЕН"
                     else "№$trNum $routeStr - ОТМЕНЕН"
                 } else {
-                    val base = if (afishaT != "—" && rawExpT != "—") {
-                        if (afishaT == rawExpT) "№$trNum $routeStr отправлением в $afishaT"
-                        else "№$trNum $routeStr отправлением в $afishaT - отправится в $rawExpT"
-                    } else if (afishaT != "—") {
-                        "№$trNum $routeStr отправлением в $afishaT"
-                    } else {
-                        "№$trNum $routeStr"
-                    }
-                    if (remNoteWord.isNotEmpty()) "$base. $remNoteWord".replace(" .", ".").trim() else base
+                    // Копируем как в выгрузке, чтобы не обрезать станции
+                    cleanParagraph
                 }
 
                 val row = TrainChangeRow(
@@ -932,7 +917,7 @@ object FileParsers {
                     dateStr = currentDate, station = currentStation, trainNumber = trNum, isToMoscow = isToMsk,
                     isMcd = PolygonConfig.isMcdTrain(trNum, cleanParagraph), isExpress = PolygonConfig.isExpressTrain(trNum, cleanParagraph), route = routeStr,
                     telegramBasis = "Выгрузка (${file.name})", afishaTime = afishaT, telegramTime = expT, exportTime = expT, yandexTime = "—",
-                    actualChangesText = cleanParagraph, wordExportLine = wordText, isCanceled = isCanceledAtThisStation, isAppointed = isAppointed, rawTelegramSnippet = cleanParagraph
+                    actualChangesText = cleanParagraph, wordExportLine = wordText, isCanceled = isCanceled, isAppointed = isAppointed, rawTelegramSnippet = cleanParagraph
                 )
                 mutableResult.getOrPut(currentStation) { mutableMapOf() }.getOrPut(currentDate) { mutableListOf() }.add(row)
             }
