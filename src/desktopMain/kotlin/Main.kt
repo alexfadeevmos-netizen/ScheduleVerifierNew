@@ -355,8 +355,11 @@ fun mergeSameTrainRowsForDay(rows: List<TrainChangeRow>): List<TrainChangeRow> {
         }
     }
     return mergedList.sortedBy { row ->
-        val t = if (row.telegramTime != "—" && row.telegramTime != "ОТМЕНЕН") row.telegramTime else row.afishaTime
-        Regex("\\d{2}:\\d{2}").find(t)?.value ?: "99:99"
+        // Сортируем по времени отправления из Афиши, если оно есть
+        val t = if (row.afishaTime != "—") row.afishaTime 
+                else if (row.telegramTime != "—" && row.telegramTime != "ОТМЕНЕН") row.telegramTime
+                else "99:99"
+        Regex("(\\d{2}:\\d{2})").find(t)?.value ?: "99:99"
     }
 }
 
@@ -520,7 +523,6 @@ object FileParsers {
                 val trainMatches = trainRegex.findAll(cleanPara).map { it.groupValues[1] }.distinct().toList()
                 if (trainMatches.isEmpty()) continue
 
-                // Строгая логика отмены: поезд отменен только если нет слова "остановк" и "стоянк"
                 val localCancel = (cleanPara.contains("отменяется", true) || cleanPara.contains("отменен", true)) &&
                         !Regex("(?i)отменен[а-я]*\\s*остановк").containsMatchIn(cleanPara)
                 val isCanceled = isGlobalCancelMode || localCancel
@@ -530,7 +532,6 @@ object FileParsers {
                     cleanPara.contains(it, true) && !cleanPara.contains("без остановки", true) 
                 }?.let { "ОШИБКА ТГ: Остановка на закрытой $it!" }
 
-                // Вытаскиваем фразы про пути
                 val pathRegex = Regex("(?i)(\\([^)]*пут[иь][^)]*\\)|по\\s*\\d+\\s*пут[иь]|проследует\\s*по\\s*\\d+\\s*пут[иь][^.,;()]*)")
                 val pathStr = pathRegex.findAll(cleanPara).map { it.value }.joinToString(" ")
 
@@ -656,7 +657,6 @@ object FileParsers {
         val dateLineRegex = Regex("(?i)^\\s*(\\d{1,2}(?:\\s*,\\s*\\d{1,2})*)\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\\s*$")
         val trainNumberRegex = Regex("№\\s*([67]\\d{3}(?:/[67]\\d{3})?)")
 
-        // Сборка абзацев выгрузки
         val paragraphs = mutableListOf<String>()
         var currentPara = ""
         for (line in text.lines()) {
@@ -706,7 +706,6 @@ object FileParsers {
                              !Regex("(?i)без\\s+остановк").containsMatchIn(paragraph)
                              
             val isAppointed = paragraph.contains("назначается", true)
-            // Убираем "(приб 17:53)" для конечного текста
             val cleanParagraph = paragraph.replace(Regex("(?i)\\s*\\(приб\\.?\\s*\\d{1,2}:\\d{2}\\)"), "")
 
             for (trNum in trainMatches) {
@@ -794,9 +793,16 @@ object WordCancelGenerator {
                     .filter { it.isToMoscow == isToMoscow && !arrivalExcludeRegex.containsMatchIn(it.wordExportLine) && !arrivalExcludeRegex.containsMatchIn(it.actualChangesText) }
                 if (filteredRows.isEmpty()) continue
 
-                val rawLines = filteredRows.map { it.wordExportLine.trim() }
-                dateToCleanLines[dateStr] = rawLines
-                val normalizedSignature = rawLines.joinToString("\n") { nightNoteRegex.replace(it, "").trim() }
+                // Сортировка по времени отправления, чтобы в Word всё шло хронологически
+                val sortedLines = filteredRows.sortedBy { row ->
+                    val timeStr = if (row.afishaTime != "—") row.afishaTime 
+                                  else if (row.telegramTime != "—" && row.telegramTime != "ОТМЕНЕН") row.telegramTime
+                                  else "99:99"
+                    Regex("(\\d{2}:\\d{2})").find(timeStr)?.value ?: "99:99"
+                }.map { it.wordExportLine.trim() }
+
+                dateToCleanLines[dateStr] = sortedLines
+                val normalizedSignature = sortedLines.joinToString("\n") { nightNoteRegex.replace(it, "").trim() }
                 signatureToDates.getOrPut(normalizedSignature) { mutableListOf() }.add(dateStr)
             }
 
@@ -833,7 +839,7 @@ object WordCancelGenerator {
                         p.spacingBefore = 0
                         p.spacingAfterLines = 0
                         p.spacingBeforeLines = 0
-                        p.setSpacingBetween(1.0, LineSpacingRule.AUTO) // Жестко одинарный 1.0 (самый плотный стандарт Word)
+                        p.setSpacingBetween(1.0, LineSpacingRule.AUTO)
                         
                         val run = p.createRun()
                         run.fontFamily = "Times New Roman"
@@ -989,7 +995,6 @@ fun TrainRApp() {
     }
 
     Row(modifier = Modifier.fillMaxSize().background(TrainRTheme.BgLight)) {
-        // Левая панель с прокруткой верхней части для избежания "сплющивания" кнопок
         Column(
             modifier = Modifier
                 .width(260.dp)
@@ -1020,7 +1025,6 @@ fun TrainRApp() {
                 SidebarNavButton(title = MainNavTab.YANDEX.title, icon = Icons.Default.CheckCircle, isSelected = currentNavTab == MainNavTab.YANDEX) { currentNavTab = MainNavTab.YANDEX }
             }
 
-            // Нижний фиксированный блок с кнопками действий
             Column(modifier = Modifier.wrapContentHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     onClick = {
@@ -1270,7 +1274,8 @@ fun TrainTableSection(activeStation: String, directionTab: DirectionTab, onDirec
             if (rows.isEmpty()) { Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Нет данных об изменениях по станции «$activeStation».", color = TrainRTheme.TextSub, fontSize = 14.sp) }
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(rows, key = { it.id }) { row ->
+                    // В интерфейсе поезда сортируются по времени отправления из Афиши
+                    items(rows.sortedBy { Regex("(\\d{2}:\\d{2})").find(if (it.afishaTime != "—") it.afishaTime else it.telegramTime)?.value ?: "99:99" }, key = { it.id }) { row ->
                         Row(modifier = Modifier.fillMaxWidth().background(if (row.globalErrorNote != null) TrainRTheme.RedCancel.copy(alpha = 0.14f) else if (row.isCanceled) TrainRTheme.RedCancel.copy(alpha = 0.06f) else Color.White).clickable { onRowClick(row) }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(row.dateStr, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TrainRTheme.TextDark, modifier = Modifier.weight(0.9f))
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1.1f)) {
