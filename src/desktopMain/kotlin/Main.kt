@@ -260,17 +260,18 @@ fun isFutureStop(currentStation: String, targetStation: String, isToMoscow: Bool
     return if (isToMoscow) {
         targetIndex < currentIndex
     } else {
-        // Из Москвы индексы увеличиваются
         targetIndex > currentIndex
     }
 }
 
 fun extractStationsByRegex(text: String, pattern: String): List<String> {
-    val match = Regex(pattern, RegexOption.IGNORE_CASE).find(text)
+    val matches = Regex(pattern, RegexOption.IGNORE_CASE).findAll(text)
     val result = mutableListOf<String>()
-    if (match != null) {
+    for (match in matches) {
         val listStr = match.groupValues[1]
-        val parts = listStr.split(Regex("[,и]"))
+        // ИСПРАВЛЕНИЕ: Разбиваем по запятой ИЛИ по слову "и" с пробелами, 
+        // чтобы не разрывать названия вроде "Химки" или "Лихоборы"
+        val parts = listStr.split(Regex(",|\\s+и\\s+", RegexOption.IGNORE_CASE))
         for (p in parts) {
             val norm = PolygonConfig.normalizeStationName(p.replace(".", "").trim())
             if (norm in PolygonConfig.ALL_STATIONS) result.add(norm)
@@ -304,7 +305,7 @@ fun buildRemainingStopsNote(
         parts.add("тех. стоянка (без посадки/высадки)")
     }
     
-    val cleanPath = pathChanges.replace(Regex("(?i)\\bИзменений\\s*нет\\.?\\b"), "").trim()
+    val cleanPath = pathChanges.replace(Regex("(?i)(?:^|[^а-яА-ЯёЁ])Изменений\\s*нет\\.?"), "").trim()
     if (cleanPath.isNotEmpty()) {
         parts.add(cleanPath)
     }
@@ -336,8 +337,6 @@ fun parseTrainTimeForSorting(timeStr: String): Int {
     val hours = m.groupValues[1].toInt()
     val minutes = m.groupValues[2].toInt()
     
-    // Ж/Д логика: поезда с 00:00 до 03:59 считаются концом ПРЕДЫДУЩИХ суток.
-    // Добавляем +24 часа, чтобы они падали в конец списка.
     val adjustedHours = if (hours in 0..3) hours + 24 else hours
     return adjustedHours * 60 + minutes
 }
@@ -357,7 +356,19 @@ fun getBaseTimeForSorting(row: TrainChangeRow): String {
 }
 
 fun getSortingTime(row: TrainChangeRow): Int {
-    return parseTrainTimeForSorting(getBaseTimeForSorting(row))
+    val actualRegex = Regex("(?i)отправится\\s+в\\s+(\\d{1,2}:\\d{2})")
+    val actualMatch = actualRegex.find(row.wordExportLine) ?: actualRegex.find(row.actualChangesText)
+    if (actualMatch != null) {
+        return parseTrainTimeForSorting(actualMatch.groupValues[1])
+    }
+    
+    val baseRegex = Regex("(?i)отправлением\\s+в\\s+(\\d{1,2}:\\d{2})")
+    val baseMatch = baseRegex.find(row.wordExportLine) ?: baseRegex.find(row.actualChangesText)
+    if (baseMatch != null) {
+        return parseTrainTimeForSorting(baseMatch.groupValues[1])
+    }
+    
+    return parseTrainTimeForSorting(row.afishaTime)
 }
 
 fun mergeSameTrainRowsForDay(rows: List<TrainChangeRow>): List<TrainChangeRow> {
@@ -563,7 +574,6 @@ object FileParsers {
         val trainRegex = Regex("(?i)(?:нр\\.|№)\\s*([1-7]\\d{2,3}(?:/[1-7]\\d{2,3})?)")
         val dateRegex = Regex("(?i)(\\d{1,2}(?:\\s*,\\s*\\d{1,2})*)\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)")
         
-        // Поддержка опциональных секунд для точного парсинга времени
         val timePairRegex = Regex("([А-Яа-яЁё\\-\\s\\d]+?)\\s+(\\d{1,2}[.:]\\d{2}(?::\\d{2})?)(?:\\s*[-–—]\\s*(\\d{1,2}[.:]\\d{2}(?::\\d{2})?))?")
 
         for (file in files) {
@@ -600,18 +610,21 @@ object FileParsers {
                 val extractedDates = dateRegex.findAll(cleanPara).map { it.groupValues[1] + " " + it.groupValues[2].lowercase(Locale.getDefault()) }.toList()
                 if (extractedDates.isNotEmpty()) currentDates = extractedDates.toMutableList()
 
-                if (Regex("(?i)\\b(отменить|отменяются)\\b").containsMatchIn(cleanPara)) {
+                // ИСПРАВЛЕНИЕ: Безопасные регулярные выражения без \b для кириллицы
+                if (Regex("(?i)(?:^|[^а-яА-ЯёЁ])(отменить|отменяются)(?:[^а-яА-ЯёЁ]|$)").containsMatchIn(cleanPara)) {
                     isGlobalCancelMode = true
-                } else if (Regex("(?i)\\b(изменить|назначить)\\b").containsMatchIn(cleanPara)) {
+                } else if (Regex("(?i)(?:^|[^а-яА-ЯёЁ])(изменить|назначить)(?:[^а-яА-ЯёЁ]|$)").containsMatchIn(cleanPara)) {
                     isGlobalCancelMode = false
                 }
 
                 val trainMatches = trainRegex.findAll(cleanPara).map { it.groupValues[1] }.distinct().toList()
                 if (trainMatches.isEmpty()) continue
 
-                val localCancel = Regex("(?i)\\b(отменяется|отмен[её]н|отменить)\\b").containsMatchIn(cleanPara) && 
+                // ИСПРАВЛЕНИЕ: Безопасные регулярные выражения без \b для кириллицы
+                val localCancel = Regex("(?i)(?:^|[^а-яА-ЯёЁ])(отменяется|отмен[её]н|отменить)(?:[^а-яА-ЯёЁ]|$)").containsMatchIn(cleanPara) && 
                                   !Regex("(?i)отменен[а-я]*\\s*остановк").containsMatchIn(cleanPara) &&
                                   !Regex("(?i)без\\s+остановк").containsMatchIn(cleanPara)
+                                  
                 val isCanceled = isGlobalCancelMode || localCancel
                 val isAppointed = cleanPara.contains("назначается", true) || cleanPara.contains("назначить", true)
 
@@ -648,7 +661,6 @@ object FileParsers {
                         if (t2.isNotEmpty()) {
                             if (isTech) skippedStops.add(stName) else stationDepTimes[stName] = t2
                         } else {
-                            // Одно время - остановка только если это первая или последняя станция маршрута
                             if (idx == 0 || idx == stopMatches.lastIndex) {
                                 stationDepTimes[stName] = t1 
                             } else {
@@ -668,7 +680,6 @@ object FileParsers {
 
                 if (targetStations.isEmpty()) continue
                 
-                // Удаляем навсегда закрытые станции из списка отмен, чтобы не засорять ворд
                 val validSkippedStops = skippedStops.filter { it !in PolygonConfig.HARD_CLOSED_STATIONS }
                 val validAddedStops = addedStops.filter { it !in PolygonConfig.HARD_CLOSED_STATIONS }
 
@@ -704,7 +715,6 @@ object FileParsers {
                         val isMcd = PolygonConfig.isMcdTrain(trainNum, cleanPara)
                         val isExp = PolygonConfig.isExpressTrain(trainNum, cleanPara)
                         
-                        // Географический фильтр: показываем только те станции, которые поезд еще НЕ ПРОЕХАЛ
                         val finalSkippedForNote = validSkippedStops.filter { it != st && isFutureStop(st, it, isToMsk) }
                         val finalAddedForNote = validAddedStops.filter { it != st && isFutureStop(st, it, isToMsk) }
                         
@@ -829,9 +839,10 @@ object FileParsers {
 
             if (cleanParagraph.isEmpty()) continue
 
-            if (Regex("(?i)\\b(отменить|отменяются)\\b").containsMatchIn(cleanParagraph)) {
+            // ИСПРАВЛЕНИЕ: Безопасные регулярные выражения без \b для кириллицы
+            if (Regex("(?i)(?:^|[^а-яА-ЯёЁ])(отменить|отменяются)(?:[^а-яА-ЯёЁ]|$)").containsMatchIn(cleanParagraph)) {
                 isGlobalCancelMode = true
-            } else if (Regex("(?i)\\b(изменить|назначить)\\b").containsMatchIn(cleanParagraph)) {
+            } else if (Regex("(?i)(?:^|[^а-яА-ЯёЁ])(изменить|назначить)(?:[^а-яА-ЯёЁ]|$)").containsMatchIn(cleanParagraph)) {
                 isGlobalCancelMode = false
             }
 
@@ -856,7 +867,8 @@ object FileParsers {
             val trainMatches = trainNumberRegex.findAll(cleanParagraph).map { it.groupValues[1] }.distinct().toList()
             if (trainMatches.isEmpty()) continue
 
-            val localCancel = Regex("(?i)\\b(отменяется|отмен[её]н|отменить)\\b").containsMatchIn(cleanParagraph) && 
+            // ИСПРАВЛЕНИЕ: Безопасные регулярные выражения без \b для кириллицы
+            val localCancel = Regex("(?i)(?:^|[^а-яА-ЯёЁ])(отменяется|отмен[её]н|отменить)(?:[^а-яА-ЯёЁ]|$)").containsMatchIn(cleanParagraph) && 
                               !Regex("(?i)отменен[а-я]*\\s+остановк").containsMatchIn(cleanParagraph) &&
                               !Regex("(?i)без\\s+остановк").containsMatchIn(cleanParagraph)
                              
@@ -900,7 +912,6 @@ object FileParsers {
                     else -> if (isToMsk) "до Москвы" else "из Москвы"
                 }
                 
-                // Географический фильтр для выгрузки
                 val finalSkippedForNote = validSkippedStops.filter { it != currentStation && isFutureStop(currentStation, it, isToMsk) }
                 val finalAddedForNote = addedStops.filter { it != currentStation && isFutureStop(currentStation, it, isToMsk) }
                 val remNoteWord = buildRemainingStopsNote(finalSkippedForNote, finalAddedForNote, false, isCanceledAtThisStation, "", forWord = true)
