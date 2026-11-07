@@ -249,6 +249,22 @@ fun main() = application {
 // 4. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ЛОГИКИ
 // ============================================================================
 
+fun isFutureStop(currentStation: String, targetStation: String, isToMoscow: Boolean): Boolean {
+    val allSt = PolygonConfig.ALL_STATIONS
+    val currentIndex = allSt.indexOfFirst { it.equals(currentStation, ignoreCase = true) }
+    val targetIndex = allSt.indexOfFirst { it.equals(targetStation, ignoreCase = true) }
+    if (currentIndex == -1 || targetIndex == -1) return true
+    
+    // Если идем на Москву, индексы станций уменьшаются (Тверь -> Москва)
+    // Будущая станция имеет меньший индекс, чем текущая.
+    return if (isToMoscow) {
+        targetIndex < currentIndex
+    } else {
+        // Из Москвы индексы увеличиваются
+        targetIndex > currentIndex
+    }
+}
+
 fun extractStationsByRegex(text: String, pattern: String): List<String> {
     val match = Regex(pattern, RegexOption.IGNORE_CASE).find(text)
     val result = mutableListOf<String>()
@@ -319,26 +335,29 @@ fun parseTrainTimeForSorting(timeStr: String): Int {
     val m = reg.find(timeStr) ?: return 9999
     val hours = m.groupValues[1].toInt()
     val minutes = m.groupValues[2].toInt()
-    return hours * 60 + minutes
+    
+    // Ж/Д логика: поезда с 00:00 до 03:59 считаются концом ПРЕДЫДУЩИХ суток.
+    // Добавляем +24 часа, чтобы они падали в конец списка.
+    val adjustedHours = if (hours in 0..3) hours + 24 else hours
+    return adjustedHours * 60 + minutes
+}
+
+fun getBaseTimeForSorting(row: TrainChangeRow): String {
+    val regex = Regex("(?i)отправлением\\s+в\\s+(\\d{1,2}:\\d{2})")
+    val match = regex.find(row.wordExportLine) ?: regex.find(row.actualChangesText)
+    
+    if (match != null) {
+        return match.groupValues[1].padStart(5, '0')
+    }
+    
+    if (row.afishaTime != "—") return row.afishaTime
+    if (row.exportTime != "—" && !row.exportTime.contains("ОТМЕН", true)) return row.exportTime.take(5)
+    if (row.telegramTime != "—" && !row.telegramTime.contains("ОТМЕН", true)) return row.telegramTime.take(5)
+    return "99:99"
 }
 
 fun getSortingTime(row: TrainChangeRow): Int {
-    // 1. Ищем фактическое измененное время (это приоритет для правильной ротации измененных поездов)
-    val actualRegex = Regex("(?i)отправится\\s+в\\s+(\\d{1,2}:\\d{2})")
-    val actualMatch = actualRegex.find(row.wordExportLine) ?: actualRegex.find(row.actualChangesText)
-    if (actualMatch != null) {
-        return parseTrainTimeForSorting(actualMatch.groupValues[1])
-    }
-    
-    // 2. Ищем базовое время отправления
-    val baseRegex = Regex("(?i)отправлением\\s+в\\s+(\\d{1,2}:\\d{2})")
-    val baseMatch = baseRegex.find(row.wordExportLine) ?: baseRegex.find(row.actualChangesText)
-    if (baseMatch != null) {
-        return parseTrainTimeForSorting(baseMatch.groupValues[1])
-    }
-    
-    // 3. Резервный механизм
-    return parseTrainTimeForSorting(row.afishaTime)
+    return parseTrainTimeForSorting(getBaseTimeForSorting(row))
 }
 
 fun mergeSameTrainRowsForDay(rows: List<TrainChangeRow>): List<TrainChangeRow> {
@@ -543,7 +562,9 @@ object FileParsers {
         val rawRowsByStationDate = mutableMapOf<String, MutableMap<String, MutableList<TrainChangeRow>>>()
         val trainRegex = Regex("(?i)(?:нр\\.|№)\\s*([1-7]\\d{2,3}(?:/[1-7]\\d{2,3})?)")
         val dateRegex = Regex("(?i)(\\d{1,2}(?:\\s*,\\s*\\d{1,2})*)\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)")
-        val timePairRegex = Regex("([А-Яа-яЁё\\-\\s\\d]+?)\\s+(\\d{1,2}[.:]\\d{2})(?:\\s*[-–—]\\s*(\\d{1,2}[.:]\\d{2}))?")
+        
+        // Поддержка опциональных секунд для точного парсинга времени
+        val timePairRegex = Regex("([А-Яа-яЁё\\-\\s\\d]+?)\\s+(\\d{1,2}[.:]\\d{2}(?::\\d{2})?)(?:\\s*[-–—]\\s*(\\d{1,2}[.:]\\d{2}(?::\\d{2})?))?")
 
         for (file in files) {
             val fullText = readSmartTextFile(file)
@@ -610,13 +631,14 @@ object FileParsers {
 
                 val stationDepTimes = mutableMapOf<String, String>()
                 val stopMatches = timePairRegex.findAll(cleanPara).toList()
+                
                 for ((idx, sm) in stopMatches.withIndex()) {
                     val rawSt = sm.groupValues[1].trim()
                     val stName = PolygonConfig.normalizeStationName(rawSt)
                     if (stName !in PolygonConfig.ALL_STATIONS) continue
 
-                    val t1 = sm.groupValues[2].replace('.', ':').padStart(5, '0')
-                    val t2 = sm.groupValues[3].replace('.', ':').let { if (it.isNotEmpty()) it.padStart(5, '0') else "" }
+                    val t1 = sm.groupValues[2].replace('.', ':').take(5).padStart(5, '0')
+                    val t2 = sm.groupValues[3].replace('.', ':').take(5).let { if (it.isNotEmpty()) it.padStart(5, '0') else "" }
                     val isTech = cleanPara.contains("тех. стоянка", true) || cleanPara.contains("стоянка техническая", true) || cleanPara.contains("без пассажиров", true)
 
                     if (isClarification) {
@@ -626,7 +648,12 @@ object FileParsers {
                         if (t2.isNotEmpty()) {
                             if (isTech) skippedStops.add(stName) else stationDepTimes[stName] = t2
                         } else {
-                            if (idx == 0) stationDepTimes[stName] = t1 else skippedStops.add(stName)
+                            // Одно время - остановка только если это первая или последняя станция маршрута
+                            if (idx == 0 || idx == stopMatches.lastIndex) {
+                                stationDepTimes[stName] = t1 
+                            } else {
+                                skippedStops.add(stName)
+                            }
                         }
                     }
                 }
@@ -640,6 +667,10 @@ object FileParsers {
                 }
 
                 if (targetStations.isEmpty()) continue
+                
+                // Удаляем навсегда закрытые станции из списка отмен, чтобы не засорять ворд
+                val validSkippedStops = skippedStops.filter { it !in PolygonConfig.HARD_CLOSED_STATIONS }
+                val validAddedStops = addedStops.filter { it !in PolygonConfig.HARD_CLOSED_STATIONS }
 
                 for (trainNum in trainMatches) {
                     for (st in targetStations) {
@@ -673,9 +704,12 @@ object FileParsers {
                         val isMcd = PolygonConfig.isMcdTrain(trainNum, cleanPara)
                         val isExp = PolygonConfig.isExpressTrain(trainNum, cleanPara)
                         
-                        val finalSkippedForNote = skippedStops.filter { it != st }
-                        val remNoteUI = buildRemainingStopsNote(finalSkippedForNote, addedStops, false, isCanceledAtThisStation, pathStr, forWord = false)
-                        val remNoteWord = buildRemainingStopsNote(finalSkippedForNote, addedStops, false, isCanceledAtThisStation, pathStr, forWord = true)
+                        // Географический фильтр: показываем только те станции, которые поезд еще НЕ ПРОЕХАЛ
+                        val finalSkippedForNote = validSkippedStops.filter { it != st && isFutureStop(st, it, isToMsk) }
+                        val finalAddedForNote = validAddedStops.filter { it != st && isFutureStop(st, it, isToMsk) }
+                        
+                        val remNoteUI = buildRemainingStopsNote(finalSkippedForNote, finalAddedForNote, false, isCanceledAtThisStation, pathStr, forWord = false)
+                        val remNoteWord = buildRemainingStopsNote(finalSkippedForNote, finalAddedForNote, false, isCanceledAtThisStation, pathStr, forWord = true)
                         
                         val changeSummary = when {
                             isCanceledAtThisStation -> "Поезд №$trainNum отменён по станции $st"
@@ -834,6 +868,9 @@ object FileParsers {
             val skippedStops = mutableListOf<String>()
             skippedStops.addAll(extractStationsByRegex(cleanParagraph, "(?i)отменен[ыа-я]*\\s*остановк[иа]?\\s*:?\\s*([^.;(]+)"))
             skippedStops.addAll(extractStationsByRegex(cleanParagraph, "(?i)без\\s*останов[ок]+\\s*:?\\s*([^.;(]+)"))
+            
+            val validSkippedStops = skippedStops.filter { it !in PolygonConfig.HARD_CLOSED_STATIONS }
+            val addedStops = extractStationsByRegex(cleanParagraph, "(?i)назначен[ыа-я]*\\s*остановк[иа]?\\s*:?\\s*([^.;(]+)").filter { it !in PolygonConfig.HARD_CLOSED_STATIONS }
 
             for (trNum in trainMatches) {
                 val isToMsk = PolygonConfig.isTrainToMoscow(trNum, cleanParagraph)
@@ -863,11 +900,24 @@ object FileParsers {
                     else -> if (isToMsk) "до Москвы" else "из Москвы"
                 }
                 
+                // Географический фильтр для выгрузки
+                val finalSkippedForNote = validSkippedStops.filter { it != currentStation && isFutureStop(currentStation, it, isToMsk) }
+                val finalAddedForNote = addedStops.filter { it != currentStation && isFutureStop(currentStation, it, isToMsk) }
+                val remNoteWord = buildRemainingStopsNote(finalSkippedForNote, finalAddedForNote, false, isCanceledAtThisStation, "", forWord = true)
+
                 val wordText = if (isCanceledAtThisStation) {
                     if (afishaT != "—") "№$trNum $routeStr отправлением в $afishaT - ОТМЕНЕН"
                     else "№$trNum $routeStr - ОТМЕНЕН"
                 } else {
-                    cleanParagraph
+                    val base = if (afishaT != "—" && rawExpT != "—") {
+                        if (afishaT == rawExpT) "№$trNum $routeStr отправлением в $afishaT"
+                        else "№$trNum $routeStr отправлением в $afishaT - отправится в $rawExpT"
+                    } else if (afishaT != "—") {
+                        "№$trNum $routeStr отправлением в $afishaT"
+                    } else {
+                        "№$trNum $routeStr"
+                    }
+                    if (remNoteWord.isNotEmpty()) "$base. $remNoteWord".replace(" .", ".").trim() else base
                 }
 
                 val row = TrainChangeRow(
