@@ -1196,66 +1196,45 @@ fun TrainRApp() {
 }
 
 @Composable
-fun TopBarLoadButton(
-    label: String,
-    count: Int,
-    badgeColor: Color,
-    onClick: () -> Unit
-) {
-    OutlinedButton(
-        onClick = onClick,
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, TrainRTheme.BorderCol),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-    ) {
-        Icon(
-            imageVector = Icons.Default.Add,
-            contentDescription = label,
-            tint = TrainRTheme.TextDark,
-            modifier = Modifier.size(16.dp)
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = label,
-            color = TrainRTheme.TextDark,
-            fontWeight = FontWeight.Bold,
-            fontSize = 12.sp
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Surface(
-            color = badgeColor,
-            shape = RoundedCornerShape(10.dp)
-        ) {
-            Text(
-                text = count.toString(),
-                color = Color.White,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.ExtraBold,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-            )
+fun VintageTrainLogo(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        drawRoundRect(color = TrainRTheme.ActionBlue, topLeft = Offset(0f, 0f), size = Size(w, h), cornerRadius = CornerRadius(12f, 12f))
+        val bodyPath = Path().apply { moveTo(w * 0.22f, h * 0.20f); lineTo(w * 0.78f, h * 0.20f); lineTo(w * 0.85f, h * 0.72f); lineTo(w * 0.15f, h * 0.72f); close() }
+        drawPath(path = bodyPath, color = Color.White)
+        drawRoundRect(color = TrainRTheme.NavyDark, topLeft = Offset(w * 0.28f, h * 0.27f), size = Size(w * 0.44f, h * 0.20f), cornerRadius = CornerRadius(4f, 4f))
+        drawCircle(color = TrainRTheme.GoldAccent, radius = w * 0.05f, center = Offset(w * 0.50f, h * 0.58f))
+        drawLine(color = TrainRTheme.GoldAccent, start = Offset(w * 0.15f, h * 0.82f), end = Offset(w * 0.85f, h * 0.82f), strokeWidth = 3f)
+    }
+}
+
+@Composable
+fun SidebarNavButton(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector, isSelected: Boolean, onClick: () -> Unit) {
+    Surface(color = if (isSelected) TrainRTheme.ActionBlue else Color.Transparent, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth().clickable { onClick() }) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
+            Icon(imageVector = icon, contentDescription = title, tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(text = title, color = if (isSelected) Color.White else Color.White.copy(alpha = 0.75f), fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium)
         }
     }
 }
 
 @Composable
-fun FilterChipItem(
-    label: String,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    Surface(
-        color = if (isSelected) TrainRTheme.NavyDark else Color.White,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, if (isSelected) TrainRTheme.NavyDark else TrainRTheme.BorderCol),
-        modifier = Modifier.clickable { onClick() }
-    ) {
-        Text(
-            text = label,
-            color = if (isSelected) Color.White else TrainRTheme.TextDark,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-        )
+fun TopBarLoadButton(label: String, count: Int, badgeColor: Color, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, TrainRTheme.BorderCol), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+        Icon(imageVector = Icons.Default.Add, contentDescription = label, tint = TrainRTheme.TextDark, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(text = label, color = TrainRTheme.TextDark, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+        Spacer(modifier = Modifier.width(6.dp))
+        Surface(color = badgeColor, shape = RoundedCornerShape(10.dp)) { Text(text = count.toString(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) }
+    }
+}
+
+@Composable
+fun FilterChipItem(label: String, isSelected: Boolean, onClick: () -> Unit) {
+    Surface(color = if (isSelected) TrainRTheme.NavyDark else Color.White, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, if (isSelected) TrainRTheme.NavyDark else TrainRTheme.BorderCol), modifier = Modifier.clickable { onClick() }) {
+        Text(text = label, color = if (isSelected) Color.White else TrainRTheme.TextDark, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
     }
 }
 
