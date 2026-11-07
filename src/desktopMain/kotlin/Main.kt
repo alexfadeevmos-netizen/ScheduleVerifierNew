@@ -737,6 +737,9 @@ object FileParsers {
                 val stationDepTimes = mutableMapOf<String, String>()
                 val stopMatches = timePairRegex.findAll(cleanPara).toList()
                 
+                val sampleTrainForDir = trainMatches.firstOrNull() ?: ""
+                val isToMskSample = PolygonConfig.isTrainToMoscow(sampleTrainForDir, cleanPara)
+
                 for ((idx, sm) in stopMatches.withIndex()) {
                     val rawSt = sm.groupValues[1].trim()
                     val stName = PolygonConfig.normalizeStationName(rawSt)
@@ -747,7 +750,7 @@ object FileParsers {
                     val isTech = cleanPara.contains("тех. стоянка", true) || cleanPara.contains("стоянка техническая", true) || cleanPara.contains("без пассажиров", true)
 
                     val isClosedSt = PolygonConfig.HARD_CLOSED_STATIONS.contains(stName) || 
-                                     (stName == "Левобережная" && !PolygonConfig.isTrainToMoscow(trainNum))
+                                     (stName == "Левобережная" && !isToMskSample)
                                      
                     if (isClarification) {
                         if (cleanPara.contains("посадка", true)) addedStops.add(stName)
