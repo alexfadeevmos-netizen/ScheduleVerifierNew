@@ -249,12 +249,27 @@ fun main() = application {
 // 4. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ЛОГИКИ
 // ============================================================================
 
+fun extractStationsByRegex(text: String, pattern: String): List<String> {
+    val match = Regex(pattern, RegexOption.IGNORE_CASE).find(text)
+    val result = mutableListOf<String>()
+    if (match != null) {
+        val listStr = match.groupValues[1]
+        val parts = listStr.split(Regex("[,и]"))
+        for (p in parts) {
+            val norm = PolygonConfig.normalizeStationName(p.trim())
+            if (norm in PolygonConfig.ALL_STATIONS) result.add(norm)
+        }
+    }
+    return result
+}
+
 fun buildRemainingStopsNote(
     skippedStops: List<String>,
     addedStops: List<String>,
     isTechStop: Boolean = false,
     isCanceled: Boolean = false,
-    pathChanges: String = ""
+    pathChanges: String = "",
+    forWord: Boolean = false
 ): String {
     if (isCanceled) return ""
     val parts = mutableListOf<String>()
@@ -262,7 +277,7 @@ fun buildRemainingStopsNote(
         parts.add("отменены остановки: " + skippedStops.distinct().joinToString(", "))
     }
     if (addedStops.isNotEmpty()) {
-        parts.add("назн. ост.: " + addedStops.distinct().joinToString(", "))
+        parts.add("назначены остановки: " + addedStops.distinct().joinToString(", "))
     }
     if (isTechStop) {
         parts.add("тех. стоянка (без посадки/высадки)")
@@ -270,7 +285,10 @@ fun buildRemainingStopsNote(
     if (pathChanges.isNotEmpty()) {
         parts.add(pathChanges.trim())
     }
-    return if (parts.isEmpty()) "по графику со всеми остановками" else parts.joinToString(". ")
+    if (parts.isEmpty()) {
+        return if (forWord) "" else "по графику со всеми остановками"
+    }
+    return parts.joinToString(". ")
 }
 
 fun calculateMinutesDiff(timeA: String, timeB: String): String {
@@ -355,7 +373,6 @@ fun mergeSameTrainRowsForDay(rows: List<TrainChangeRow>): List<TrainChangeRow> {
         }
     }
     return mergedList.sortedBy { row ->
-        // Сортируем по времени отправления из Афиши, если оно есть
         val t = if (row.afishaTime != "—") row.afishaTime 
                 else if (row.telegramTime != "—" && row.telegramTime != "ОТМЕНЕН") row.telegramTime
                 else "99:99"
@@ -502,7 +519,6 @@ object FileParsers {
             val isClarification = fullText.contains("Внести разъяснение", ignoreCase = true)
             val basisStr = Regex("(?i)(?:телеграмм[аы]|ТГ|№)\\s*([\\d/\\-А-Яа-я]+)").find(fullText)?.value ?: file.nameWithoutExtension
 
-            // Разбиваем на абзацы по ключевым словам для защиты контекста (отмены/назначения)
             val paragraphs = fullText.split(Regex("\\n(?=\\s*(нр\\.|№|\\d+\\.|Отменить|Изменить|Назначить))", RegexOption.IGNORE_CASE))
             var isGlobalCancelMode = false
             var currentDates = mutableListOf("19 октября")
@@ -514,17 +530,18 @@ object FileParsers {
                 val extractedDates = dateRegex.findAll(cleanPara).map { it.groupValues[1] + " " + it.groupValues[2].lowercase(Locale.getDefault()) }.toList()
                 if (extractedDates.isNotEmpty()) currentDates = extractedDates.toMutableList()
 
-                if (cleanPara.contains("Отменить", true) || cleanPara.contains("Отменяются", true)) {
+                if (Regex("(?i)\\b(отменить|отменяются)\\b").containsMatchIn(cleanPara)) {
                     isGlobalCancelMode = true
-                } else if (cleanPara.contains("Изменить", true) || cleanPara.contains("Назначить", true)) {
+                } else if (Regex("(?i)\\b(изменить|назначить)\\b").containsMatchIn(cleanPara)) {
                     isGlobalCancelMode = false
                 }
 
                 val trainMatches = trainRegex.findAll(cleanPara).map { it.groupValues[1] }.distinct().toList()
                 if (trainMatches.isEmpty()) continue
 
-                val localCancel = (cleanPara.contains("отменяется", true) || cleanPara.contains("отменен", true)) &&
-                        !Regex("(?i)отменен[а-я]*\\s*остановк").containsMatchIn(cleanPara)
+                val localCancel = Regex("(?i)\\b(отменяется|отмен[её]н|отменить)\\b").containsMatchIn(cleanPara) && 
+                                  !Regex("(?i)отменен[а-я]*\\s*остановк").containsMatchIn(cleanPara) &&
+                                  !Regex("(?i)без\\s+остановк").containsMatchIn(cleanPara)
                 val isCanceled = isGlobalCancelMode || localCancel
                 val isAppointed = cleanPara.contains("назначается", true) || cleanPara.contains("назначить", true)
 
@@ -537,8 +554,11 @@ object FileParsers {
 
                 val skippedStops = mutableListOf<String>()
                 val addedStops = mutableListOf<String>()
-                val stationDepTimes = mutableMapOf<String, String>()
+                
+                skippedStops.addAll(extractStationsByRegex(cleanPara, "(?i)отменен[ыа-я]*\\s*остановк[иа]?\\s*:?\\s*([^.;(]+)"))
+                addedStops.addAll(extractStationsByRegex(cleanPara, "(?i)назначен[ыа-я]*\\s*остановк[иа]?\\s*:?\\s*([^.;(]+)"))
 
+                val stationDepTimes = mutableMapOf<String, String>()
                 val stopMatches = timePairRegex.findAll(cleanPara).toList()
                 for ((idx, sm) in stopMatches.withIndex()) {
                     val rawSt = sm.groupValues[1].trim()
@@ -580,17 +600,21 @@ object FileParsers {
                         
                         val isMcd = PolygonConfig.isMcdTrain(trainNum, cleanPara)
                         val isExp = PolygonConfig.isExpressTrain(trainNum, cleanPara)
-                        val remNote = buildRemainingStopsNote(skippedStops, addedStops, false, isCanceled, pathStr)
+                        
+                        val remNoteUI = buildRemainingStopsNote(skippedStops, addedStops, false, isCanceled, pathStr, forWord = false)
+                        val remNoteWord = buildRemainingStopsNote(skippedStops, addedStops, false, isCanceled, pathStr, forWord = true)
                         
                         val changeSummary = when {
                             isCanceled -> "Поезд №$trainNum отменён на участке следования"
-                            isAppointed -> "Назначается поезд №$trainNum отпр. в $tgT ($remNote)"
-                            else -> "Поезд №$trainNum отпр. в $tgT ($remNote)"
+                            isAppointed -> "Назначается поезд №$trainNum отпр. в $tgT ($remNoteUI)"
+                            else -> "Поезд №$trainNum отпр. в $tgT ($remNoteUI)"
                         }
 
-                        val wordText = when {
-                            isCanceled -> "№$trainNum $routeStr отправлением в $afishaT - ОТМЕНЕН"
-                            else -> "№$trainNum $routeStr отправлением в $afishaT - отправится в $tgT. $remNote".replace(" .", ".").trim()
+                        val wordText = if (isCanceled) {
+                            "№$trainNum $routeStr отправлением в $afishaT - ОТМЕНЕН"
+                        } else {
+                            val base = "№$trainNum $routeStr отправлением в $afishaT - отправится в $tgT"
+                            if (remNoteWord.isNotEmpty()) "$base. $remNoteWord".replace(" .", ".").trim() else base
                         }
 
                         for (dateKey in currentDates.distinct()) {
@@ -679,7 +703,15 @@ object FileParsers {
         }
         if (currentPara.isNotEmpty()) paragraphs.add(currentPara)
 
+        var isGlobalCancelMode = false
+
         for (paragraph in paragraphs) {
+            if (Regex("(?i)\\b(отменить|отменяются)\\b").containsMatchIn(paragraph)) {
+                isGlobalCancelMode = true
+            } else if (Regex("(?i)\\b(изменить|назначить)\\b").containsMatchIn(paragraph)) {
+                isGlobalCancelMode = false
+            }
+
             val stHeaderMatch = stationHeaderRegex.find(paragraph)
             if (stHeaderMatch != null) {
                 PolygonConfig.normalizeStationName(stHeaderMatch.groupValues[1]).takeIf { it in PolygonConfig.ALL_STATIONS }?.let { currentStation = it }
@@ -701,11 +733,13 @@ object FileParsers {
             val trainMatches = trainNumberRegex.findAll(paragraph).map { it.groupValues[1] }.distinct().toList()
             if (trainMatches.isEmpty()) continue
 
-            val isCanceled = Regex("(?i)\\b(отменяется|отмен[её]н|отменить)\\b").containsMatchIn(paragraph) && 
-                             !Regex("(?i)отменен[а-я]*\\s+остановк").containsMatchIn(paragraph) &&
-                             !Regex("(?i)без\\s+остановк").containsMatchIn(paragraph)
+            val localCancel = Regex("(?i)\\b(отменяется|отмен[её]н|отменить)\\b").containsMatchIn(paragraph) && 
+                              !Regex("(?i)отменен[а-я]*\\s+остановк").containsMatchIn(paragraph) &&
+                              !Regex("(?i)без\\s+остановк").containsMatchIn(paragraph)
                              
+            val isCanceled = isGlobalCancelMode || localCancel
             val isAppointed = paragraph.contains("назначается", true)
+            
             val cleanParagraph = paragraph.replace(Regex("(?i)\\s*\\(приб\\.?\\s*\\d{1,2}:\\d{2}\\)"), "")
 
             for (trNum in trainMatches) {
@@ -796,10 +830,11 @@ object WordCancelGenerator {
                 // Сортировка по времени отправления, чтобы в Word всё шло хронологически
                 val sortedLines = filteredRows.sortedBy { row ->
                     val timeStr = if (row.afishaTime != "—") row.afishaTime 
+                                  else if (row.exportTime != "—" && row.exportTime != "ОТМЕНЕН") row.exportTime
                                   else if (row.telegramTime != "—" && row.telegramTime != "ОТМЕНЕН") row.telegramTime
                                   else "99:99"
                     Regex("(\\d{2}:\\d{2})").find(timeStr)?.value ?: "99:99"
-                }.map { it.wordExportLine.trim() }
+                }.map { it.wordExportLine.trim() }.distinct()
 
                 dateToCleanLines[dateStr] = sortedLines
                 val normalizedSignature = sortedLines.joinToString("\n") { nightNoteRegex.replace(it, "").trim() }
@@ -984,7 +1019,6 @@ fun TrainRApp() {
             }
     }
     
-    // Фильтр для вкладки Отчетов (клики по карточкам)
     val reportRows = baseRows.filter {
         when(currentReportFilter) {
             "CANCELED" -> it.isCanceled
@@ -1274,7 +1308,6 @@ fun TrainTableSection(activeStation: String, directionTab: DirectionTab, onDirec
             if (rows.isEmpty()) { Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Нет данных об изменениях по станции «$activeStation».", color = TrainRTheme.TextSub, fontSize = 14.sp) }
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    // В интерфейсе поезда сортируются по времени отправления из Афиши
                     items(rows.sortedBy { Regex("(\\d{2}:\\d{2})").find(if (it.afishaTime != "—") it.afishaTime else it.telegramTime)?.value ?: "99:99" }, key = { it.id }) { row ->
                         Row(modifier = Modifier.fillMaxWidth().background(if (row.globalErrorNote != null) TrainRTheme.RedCancel.copy(alpha = 0.14f) else if (row.isCanceled) TrainRTheme.RedCancel.copy(alpha = 0.06f) else Color.White).clickable { onRowClick(row) }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(row.dateStr, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TrainRTheme.TextDark, modifier = Modifier.weight(0.9f))
