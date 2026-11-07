@@ -446,6 +446,75 @@ fun mergeSameTrainRowsForDay(rows: List<TrainChangeRow>): List<TrainChangeRow> {
     return mergedList.sortedBy { getSortingTime(it) }
 }
 
+
+fun buildFullThreads(map: StationDateTrainMap, afishaMap: Map<String, AfishaBaseTrain>): StationDateTrainMap {
+    val dateTrainRows = mutableMapOf<String, MutableMap<String, MutableList<TrainChangeRow>>>()
+    for ((st, dateMap) in map) {
+        for ((dt, trainMap) in dateMap) {
+            for ((tNum, row) in trainMap) {
+                dateTrainRows.getOrPut(dt) { mutableMapOf() }.getOrPut(tNum) { mutableListOf() }.add(row)
+            }
+        }
+    }
+
+    val resultMap = mutableMapOf<String, MutableMap<String, MutableMap<String, TrainChangeRow>>>()
+    
+    for ((dt, trainMap) in dateTrainRows) {
+        for ((tNum, rows) in trainMap) {
+            val baseTrain = afishaMap[tNum]
+            val isToMsk = rows.firstOrNull()?.isToMoscow ?: true
+            
+            val parsedStations = rows.associateBy { it.station }
+            val afishaStations = baseTrain?.stationTimes?.keys ?: emptySet()
+            val allStations = (parsedStations.keys + afishaStations).distinct()
+            
+            val sortedStations = allStations.sortedWith(compareBy({ st -> 
+                val parsedRow = parsedStations[st]
+                if (parsedRow != null) {
+                    getSortingTime(parsedRow)
+                } else {
+                    parseTrainTimeForSorting(baseTrain?.stationTimes?.get(st) ?: "99:99")
+                }
+            }, { st ->
+                val idx = PolygonConfig.ALL_STATIONS.indexOfFirst { it.equals(st, ignoreCase = true) }
+                if (isToMsk) -idx else idx
+            }))
+            
+            val threadEntries = sortedStations.map { st ->
+                val parsedRow = parsedStations[st]
+                if (parsedRow != null) {
+                     val isSkipped = parsedRow.isCanceled || parsedRow.telegramTime.contains("ОТМЕН", true) || parsedRow.exportTime.contains("ОТМЕН", true)
+                     StationStopEntry(
+                         stationName = st,
+                         afishaTime = parsedRow.afishaTime,
+                         telegramTime = parsedRow.telegramTime,
+                         exportTime = parsedRow.exportTime,
+                         yandexTime = parsedRow.yandexTime,
+                         isSkippedByTelegram = isSkipped,
+                         isAddedByTelegram = parsedRow.isAppointed,
+                         isTechStop = false
+                     )
+                } else {
+                     val aTime = baseTrain?.stationTimes?.get(st) ?: "—"
+                     StationStopEntry(
+                         stationName = st,
+                         afishaTime = aTime,
+                         telegramTime = aTime,
+                         exportTime = aTime,
+                         yandexTime = "—"
+                     )
+                }
+            }
+            
+            for (r in rows) {
+                resultMap.getOrPut(r.station) { mutableMapOf() }
+                         .getOrPut(dt) { mutableMapOf() }[tNum] = r.copy(fullThread = threadEntries)
+            }
+        }
+    }
+    return resultMap
+}
+
 fun evaluateFourWayAuditStatus(
     afishaTime: String,
     telegramTime: String,
@@ -1186,7 +1255,8 @@ fun TrainRApp() {
             for (f in loadedExportFiles) {
                 map = FileParsers.parseSummaryExportFile(f, afishaCacheMap, map)
             }
-            stationScheduleMap = map
+            // Формируем полные нитки следования для досье
+            stationScheduleMap = buildFullThreads(map, afishaCacheMap)
         }
     }
 
