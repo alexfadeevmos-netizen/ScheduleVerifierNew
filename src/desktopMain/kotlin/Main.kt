@@ -1048,6 +1048,7 @@ object FileParsers {
                 if (isCanceledAtThisStation && !hasNewRoute && !Regex("отмен", RegexOption.IGNORE_CASE).containsMatchIn(wordText)) {
                     wordText = "$wordText - ОТМЕНЕН"
                 }
+                wordText = wordText.replace(Regex("(?i)\\s*(?:Малино|Петровско-Разумовская|Рижская|Лазурная)\\s*$"), "").trim()
 
                 for(currentDate in currentDates) {
                     val row = TrainChangeRow(
@@ -1135,11 +1136,14 @@ object WordCancelGenerator {
             val stationDateMap = allData[station] ?: continue
             val datesToProcess = if (selectedDates.isEmpty()) stationDateMap.keys else stationDateMap.keys.intersect(selectedDates)
             if (datesToProcess.isEmpty()) continue
+            
+            // Сортируем даты хронологически
+            val sortedDatesToProcess = datesToProcess.sortedBy { parseDateForSort(it) }
 
             val signatureToDates = linkedMapOf<String, MutableList<String>>()
             val dateToCleanLines = mutableMapOf<String, List<String>>()
 
-            for (dateStr in datesToProcess) {
+            for (dateStr in sortedDatesToProcess) {
                 val trainMap = stationDateMap[dateStr] ?: continue
                 val filteredRows = trainMap.values
                     .filter { it.isToMoscow == isToMoscow && !arrivalExcludeRegex.containsMatchIn(it.wordExportLine) && !arrivalExcludeRegex.containsMatchIn(it.actualChangesText) && !isTerminalStationForTrain(station, it) }
@@ -1244,12 +1248,12 @@ object WordCancelGenerator {
 
     private fun formatMergedDatesHeader(dates: List<String>): String {
         if (dates.size == 1) return dates.first()
-        val parsed = dates.map { d ->
+        val parsed = dates.sortedBy { parseDateForSort(it) }.map { d ->
             val parts = d.trim().split(Regex("\\s+"))
             Pair(parts.firstOrNull() ?: d, parts.drop(1).joinToString(" "))
         }
         return parsed.groupBy({ it.second }, { it.first }).entries.joinToString(", ") { (month, days) ->
-            val sortedDays = days.sortedBy { it.toIntOrNull() ?: 99 }
+            val sortedDays = days.mapNotNull { it.toIntOrNull() }.sorted()
             if (month.isNotBlank()) "${sortedDays.joinToString(",")} $month" else sortedDays.joinToString(",")
         }
     }
