@@ -348,6 +348,29 @@ fun calculateMinutesDiff(timeA: String, timeB: String): String {
     }
 }
 
+fun parseDateForSort(dateStr: String): Int {
+    val parts = dateStr.trim().split(Regex("\\s+"))
+    if (parts.isEmpty()) return 9999
+    val day = parts[0].toIntOrNull() ?: 99
+    val monthStr = parts.getOrNull(1)?.lowercase() ?: ""
+    val month = when {
+        monthStr.startsWith("янв") -> 1
+        monthStr.startsWith("фев") -> 2
+        monthStr.startsWith("мар") -> 3
+        monthStr.startsWith("апр") -> 4
+        monthStr.startsWith("ма") -> 5
+        monthStr.startsWith("июн") -> 6
+        monthStr.startsWith("июл") -> 7
+        monthStr.startsWith("авг") -> 8
+        monthStr.startsWith("сен") -> 9
+        monthStr.startsWith("окт") -> 10
+        monthStr.startsWith("ноя") -> 11
+        monthStr.startsWith("дек") -> 12
+        else -> 99
+    }
+    return month * 100 + day
+}
+
 fun parseTrainTimeForSorting(timeStr: String): Int {
     if (timeStr == "—" || timeStr.contains("ОТМЕН", true)) return 9999
     val reg = Regex("(\\d{1,2}):(\\d{2})")
@@ -1138,7 +1161,7 @@ object WordCancelGenerator {
             if (datesToProcess.isEmpty()) continue
             
             // Сортируем даты хронологически
-            val sortedDatesToProcess = datesToProcess.sortedBy { parseDateForSort(it) }
+            val sortedDatesToProcess = datesToProcess.sortedBy { it: String -> parseDateForSort(it) }
 
             val signatureToDates = linkedMapOf<String, MutableList<String>>()
             val dateToCleanLines = mutableMapOf<String, List<String>>()
@@ -1248,7 +1271,7 @@ object WordCancelGenerator {
 
     private fun formatMergedDatesHeader(dates: List<String>): String {
         if (dates.size == 1) return dates.first()
-        val parsed = dates.sortedBy { parseDateForSort(it) }.map { d ->
+        val parsed = dates.sortedBy { it: String -> parseDateForSort(it) }.map { d ->
             val parts = d.trim().split(Regex("\\s+"))
             Pair(parts.firstOrNull() ?: d, parts.drop(1).joinToString(" "))
         }
