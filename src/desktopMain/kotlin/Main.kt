@@ -1901,10 +1901,12 @@ object WordCancelGenerator {
     private val departureIncludeRegex = Regex("(?iu)(отправлением\\s+в|отправится\\s+в|назначается)")
     private val nightNoteRegex = Regex("(?iu)\\s*\\(в\\s+ночь\\s+на\\s+[^)]+\\)")
 
-    // С уменьшенными верхним и нижним полями страницы (по 1.0 см вместо стандартных 2.54 см)
-    // на листе A4 плотно помещаются 54 визуальные строки без пустых зон внизу страницы (рис. 1-3).
-    private const val MAX_VISUAL_LINES_PER_PAGE = 54
-    private const val CHARS_PER_LINE_12PT = 92
+    // Точная калибровка по фактической верстке MS Word (образцы Крюково, Сходня, Химки):
+    // При полях сверху/снизу 450 twips (~0.8 см) физическая страница вмещает 53–54 строки,
+    // а порог 52 визуальные строки исключает самопроизвольный перенос 1–2 строк в Word без заголовка
+    // и появление полупустых страниц из-за двойного разрыва (рис. 1–2).
+    private const val MAX_VISUAL_LINES_PER_PAGE = 52
+    private const val CHARS_PER_LINE_12PT = 90
 
     private fun isTerminalStationForTrain(station: String, row: TrainChangeRow): Boolean {
         val text = row.wordExportLine
@@ -1949,8 +1951,8 @@ object WordCancelGenerator {
             val body = doc.document.body
             val sectPr = if (body.isSetSectPr) body.sectPr else body.addNewSectPr()
             val pageMar = if (sectPr.isSetPgMar) sectPr.pgMar else sectPr.addNewPgMar()
-            pageMar.top = BigInteger.valueOf(567)    // 1.0 см сверху
-            pageMar.bottom = BigInteger.valueOf(567) // 1.0 см снизу
+            pageMar.top = BigInteger.valueOf(450)    // ~0.8 см сверху (резерв от авто-переноса Word)
+            pageMar.bottom = BigInteger.valueOf(450) // ~0.8 см снизу (резерв от авто-переноса Word)
             pageMar.left = BigInteger.valueOf(850)   // 1.5 см слева
             pageMar.right = BigInteger.valueOf(567)  // 1.0 см справа
         } catch (_: Exception) {}
@@ -2024,10 +2026,13 @@ object WordCancelGenerator {
                     if (linesForDate.isEmpty()) continue
 
                     val firstTrainVisualLines = estimateVisualLines("        ${linesForDate.first().trim()}")
+                    val secondTrainVisualLines = if (linesForDate.size > 1) {
+                        estimateVisualLines("        ${linesForDate[1].trim()}")
+                    } else 0
 
-                    // Переносим заголовок новой даты на следующую страницу ТОЛЬКО если на текущей странице
-                    // вообще не осталось места даже для заголовка даты и первого поезда
-                    if (currentPageVisualLines + 1 + firstTrainVisualLines > MAX_VISUAL_LINES_PER_PAGE) {
+                    // Если в самом низу страницы помещается только заголовок новой даты и 1-2 строчки,
+                    // после чего сразу потребуется разрыв страницы — начинаем новую дату с новой страницы.
+                    if (currentPageVisualLines + 1 + firstTrainVisualLines + secondTrainVisualLines > MAX_VISUAL_LINES_PER_PAGE) {
                         addNewPageStationHeader(doc, station, subtitle)
                         currentPageVisualLines = 2
                     }
