@@ -55,6 +55,7 @@ import java.awt.Toolkit
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.math.BigInteger
 import java.nio.charset.Charset
 import java.time.YearMonth
 import java.util.Locale
@@ -611,7 +612,7 @@ fun parseTrainTimeForSorting(timeStr: String): Int {
 }
 
 fun getSortingTime(row: TrainChangeRow): Int {
-    val baseRegex = Regex("(?iu)отправлением\\s+в\\s+(\\d{1,2}[:.]\\d{2})")
+    val baseRegex = Regex("(?iu)(?:отправлением\\s+в|назначается[^.\\n]*?\\s+в)\\s+(\\d{1,2}[:.]\\d{2})")
     val baseMatch = baseRegex.find(row.wordExportLine) ?: baseRegex.find(row.actualChangesText)
     if (baseMatch != null) {
         return parseTrainTimeForSorting(baseMatch.groupValues[1])
@@ -825,7 +826,7 @@ fun buildFullThreads(
                 val yandexMatch = yandexList.firstOrNull {
                     (it.trainNumber == tNum || (it.trainNumber == "—" && (it.departureTime == afishaT || it.departureTime == expT.take(5)))) &&
                         (it.station.equals(st, true) || it.station.isBlank()) &&
-                        (it.dateStr == dt || it.dateStr == "Без даты")
+                        (it.dateStr == dt || it.dateStr == "Все даты")
                 }
                 val yndT = yandexMatch?.let {
                     if (it.statusText.contains("Отмен", true)) "${it.departureTime} ОТМЕНА" else it.departureTime
@@ -880,7 +881,7 @@ fun buildFullThreads(
                 val matchedYandex = yandexList.firstOrNull {
                     (it.trainNumber == tNum || (it.trainNumber == "—" && (it.departureTime == r.afishaTime || it.departureTime == cleanExpDep))) &&
                         (it.station.equals(r.station, true) || it.station.isBlank()) &&
-                        (it.dateStr == dt || it.dateStr == "Без даты")
+                        (it.dateStr == dt || it.dateStr == "Все даты")
                 }
                 val updatedYandexTime = matchedYandex?.let {
                     if (it.statusText.contains("Отмен", true)) "${it.departureTime} ОТМЕНА" else it.departureTime
@@ -1667,7 +1668,7 @@ object FileParsers {
 
                 if (cleanParagraph.isEmpty()) continue
 
-                val hasDepartureWord = Regex("(?iu)(отправлением\\s+в|отправится\\s+в)").containsMatchIn(cleanParagraph)
+                val hasDepartureWord = Regex("(?iu)(отправлением\\s+в|отправится\\s+в|назначается)").containsMatchIn(cleanParagraph)
                 val hasArrivalWord = Regex("(?iu)(прибытием\\s+в|прибывает\\s+в|прибудет\\s+в)").containsMatchIn(cleanParagraph)
                 if (hasArrivalWord && !hasDepartureWord) continue
 
@@ -1703,7 +1704,7 @@ object FileParsers {
                 val isSkippedHere = effectiveStation in skippedStops || hasGeneralSkip
                 val isCanceledAtThisStation = isFullCancel || isSkippedHere
 
-                val baseTimeMatch = Regex("(?iu)отправлением\\s+в\\s+(\\d{1,2}[:.]\\d{2})").find(cleanParagraph)
+                val baseTimeMatch = Regex("(?iu)(?:отправлением\\s+в|назначается[^.\\n]*?\\s+в)\\s+(\\d{1,2}[:.]\\d{2})").find(cleanParagraph)
                 val newTimeMatch = Regex("(?iu)(?:отправится|отпр\\.?|пойдет|следует)\\s+в\\s+(\\d{1,2}[:.]\\d{2})").find(cleanParagraph)
                 val timesFound = Regex("(\\d{1,2}[:.]\\d{2})").findAll(cleanParagraph).map { it.groupValues[1].replace('.', ':').padStart(5, '0') }.toList()
 
@@ -1782,14 +1783,6 @@ object FileParsers {
         return out
     }
 
-    /**
-     * Умный парсер PDF-файлов Яндекс.Расписаний (с sortByPosition = true).
-     * Распознает строки расписания в любом порядке колонок:
-     * - Время + Номер поезда + Маршрут ("04:37  6501 Тверь — Москва")
-     * - Номер поезда + Маршрут + Время ("6501 Тверь — Москва  04:37")
-     * - Смежные строки (когда время и номер/маршрут находятся на соседних строках PDF)
-     * - Строки Яндекс.Расписаний со временем и маршрутом без явного 4-значного номера поезда.
-     */
     fun parseYandexPdfFiles(files: List<File>): Pair<List<YandexParsedTrain>, String> {
         val parsed = mutableListOf<YandexParsedTrain>()
         val rawTextBuilder = StringBuilder()
@@ -1817,7 +1810,6 @@ object FileParsers {
                 var i = 0
                 while (i < lines.size) {
                     val line = lines[i]
-                    // Пропускаем чисто технические строки колонтитулов браузера (URL, дату печати с секундами, номера страниц)
                     if (line.startsWith("http", ignoreCase = true) || Regex("^\\d+/\\d+$").matches(line)) {
                         i++
                         continue
@@ -1827,7 +1819,6 @@ object FileParsers {
                     val trainInLine = trainNumRegex.find(line)?.groupValues?.get(1)
 
                     if (timesInLine.isNotEmpty() && trainInLine != null) {
-                        // В одной строке есть и время, и номер поезда (в любом порядке!)
                         val depTime = timesInLine.first()
                         val arrTime = if (timesInLine.size >= 2) timesInLine[1] else "—"
                         val nextLineContext = lines.getOrNull(i + 1)?.takeIf { timeRegex.find(it) == null } ?: ""
@@ -1855,7 +1846,6 @@ object FileParsers {
                         continue
                     }
 
-                    // Если в текущей строке есть время, а номер поезда или маршрут на соседней строке (выше или ниже)
                     if (timesInLine.isNotEmpty()) {
                         val nextLine = lines.getOrNull(i + 1) ?: ""
                         val prevLine = lines.getOrNull(i - 1) ?: ""
@@ -1903,18 +1893,18 @@ object FileParsers {
 }
 
 // ============================================================================
-// 6. ГЕНЕРАТОР ФАЙЛОВ WORD (.DOCX) — КОМПАКТНОЕ ЗАПОЛНЕНИЕ СТРАНИЦ БЕЗ ПУСТОТ
+// 6. ГЕНЕРАТОР ФАЙЛОВ WORD (.DOCX) — МАКСИМАЛЬНО ПЛОТНОЕ ЗАПОЛНЕНИЕ БЕЗ РАЗРЫВОВ ВНИЗУ
 // ============================================================================
 
 object WordCancelGenerator {
     private val arrivalExcludeRegex = Regex("(?iu)(прибытием\\s+в|прибывает\\s+в|прибудет\\s+в)")
-    private val departureIncludeRegex = Regex("(?iu)(отправлением\\s+в|отправится\\s+в)")
+    private val departureIncludeRegex = Regex("(?iu)(отправлением\\s+в|отправится\\s+в|назначается)")
     private val nightNoteRegex = Regex("(?iu)\\s*\\(в\\s+ночь\\s+на\\s+[^)]+\\)")
 
-    // На стандартной странице A4 в Word (Times New Roman 12pt, одинарный интервал 1.0)
-    // реально помещается 46 визуальных строк, а ширина строки (16.5 см) вмещает 90 символов.
-    private const val MAX_VISUAL_LINES_PER_PAGE = 46
-    private const val CHARS_PER_LINE_12PT = 90
+    // С уменьшенными верхним и нижним полями страницы (по 1.0 см вместо стандартных 2.54 см)
+    // на листе A4 плотно помещаются 54 визуальные строки без пустых зон внизу страницы (рис. 1-3).
+    private const val MAX_VISUAL_LINES_PER_PAGE = 54
+    private const val CHARS_PER_LINE_12PT = 92
 
     private fun isTerminalStationForTrain(station: String, row: TrainChangeRow): Boolean {
         val text = row.wordExportLine
@@ -1950,8 +1940,23 @@ object WordCancelGenerator {
         return allData.values.any { dtMap -> dtMap.values.any { trMap -> trMap.values.any { it.hasExport } } }
     }
 
+    /**
+     * Устанавливает компактные поля страницы Word (верхнее и нижнее по 1.0 см = 567 twips),
+     * чтобы текст доходил почти до самого низа листа и не оставлял пустых мест (рис. 1-3).
+     */
+    private fun configureCompactPageMargins(doc: XWPFDocument) {
+        try {
+            val body = doc.document.body
+            val sectPr = if (body.isSetSectPr) body.sectPr else body.addNewSectPr()
+            val pageMar = if (sectPr.isSetPgMar) sectPr.pgMar else sectPr.addNewPgMar()
+            pageMar.top = BigInteger.valueOf(567)    // 1.0 см сверху
+            pageMar.bottom = BigInteger.valueOf(567) // 1.0 см снизу
+            pageMar.left = BigInteger.valueOf(850)   // 1.5 см слева
+            pageMar.right = BigInteger.valueOf(567)  // 1.0 см справа
+        } catch (_: Exception) {}
+    }
+
     private fun estimateVisualLines(textWithIndent: String): Int {
-        // Строка до 90 символов занимает ровно 1 визуальную строку в Word
         return maxOf(1, (textWithIndent.length + CHARS_PER_LINE_12PT - 1) / CHARS_PER_LINE_12PT)
     }
 
@@ -2007,6 +2012,7 @@ object WordCancelGenerator {
             val outFile = File(targetFolder, "$station $fileNameSuffix.docx")
 
             XWPFDocument().use { doc ->
+                configureCompactPageMargins(doc)
                 val subtitle = getDirectionSubtitle(isToMoscow)
                 addCenteredBoldHeader(doc, "$station  Изменения в графике движения эл/поездов")
                 addCenteredBoldHeader(doc, subtitle)
@@ -2020,7 +2026,7 @@ object WordCancelGenerator {
                     val firstTrainVisualLines = estimateVisualLines("        ${linesForDate.first().trim()}")
 
                     // Переносим заголовок новой даты на следующую страницу ТОЛЬКО если на текущей странице
-                    // вообще не осталось места даже для заголовка даты и первой строки поезда
+                    // вообще не осталось места даже для заголовка даты и первого поезда
                     if (currentPageVisualLines + 1 + firstTrainVisualLines > MAX_VISUAL_LINES_PER_PAGE) {
                         addNewPageStationHeader(doc, station, subtitle)
                         currentPageVisualLines = 2
@@ -2029,15 +2035,20 @@ object WordCancelGenerator {
                     addCenteredBoldHeader(doc, formattedDatesHeader)
                     currentPageVisualLines += 1
 
-                    for (rawLine in linesForDate) {
+                    for ((idx, rawLine) in linesForDate.withIndex()) {
                         val finalTrainLine = "        ${rawLine.trim()}"
                         val neededLines = estimateVisualLines(finalTrainLine)
+                        val isLastTrainOfDate = idx == linesForDate.lastIndex
 
-                        // Когда страница полностью заполнена (46 строк), переносим остаток списка этой даты
-                        // на следующую страницу с двухстрочным заголовком продолжения:
-                        // 1) "Химки продолжение на 19, 20 ноября"
-                        // 2) "на Москву / Ипподром"
-                        if (currentPageVisualLines + neededLines > MAX_VISUAL_LINES_PER_PAGE) {
+                        // Допускаем +1 резервную строку для самого последнего поезда даты,
+                        // чтобы не переносить 1 одиночную строчку на новую страницу
+                        val effectiveLimit = if (isLastTrainOfDate && neededLines == 1) {
+                            MAX_VISUAL_LINES_PER_PAGE + 1
+                        } else {
+                            MAX_VISUAL_LINES_PER_PAGE
+                        }
+
+                        if (currentPageVisualLines + neededLines > effectiveLimit) {
                             addContinuationHeader(doc, station, formattedDatesHeader, subtitle)
                             currentPageVisualLines = 2
                         }
@@ -3289,12 +3300,6 @@ fun DetailedReportTrainCard(row: TrainChangeRow, onClick: () -> Unit) {
     }
 }
 
-/**
- * Вкладка РАСПИСАНИЕ / ЯНДЕКС (рис. 3):
- * Сразу после загрузки PDF Яндекс.Расписаний отображает все данные из этого PDF-файла,
- * сопоставляет их с выгрузкой и телеграммой по номеру поезда или времени отправления,
- * а также позволяет просмотреть полный текст загруженного PDF-документа.
- */
 @Composable
 fun YandexAuditTabView(
     activeStation: String,
@@ -3394,7 +3399,6 @@ fun YandexAuditTabView(
                     }
                 }
             } else {
-                // Переключатель режимов просмотра загруженного PDF Яндекса
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -3538,7 +3542,6 @@ fun YandexAuditTabView(
                                 }
                             }
                         } else {
-                            // Если PDF нестандартного формата, сразу показываем полный извлеченный текст из PDF
                             Surface(
                                 color = Color(0xFFF8FAFC),
                                 shape = RoundedCornerShape(8.dp),
