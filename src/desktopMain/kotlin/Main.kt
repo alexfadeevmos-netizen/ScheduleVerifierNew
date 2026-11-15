@@ -55,7 +55,6 @@ import java.awt.Toolkit
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.math.BigInteger
 import java.nio.charset.Charset
 import java.time.YearMonth
 import java.util.Locale
@@ -618,10 +617,6 @@ fun getSortingTime(row: TrainChangeRow): Int {
     return parseTrainTimeForSorting(row.telegramTime)
 }
 
-/**
- * Умная компиляция данных по одному поезду, дате и станции.
- * Собирает ВСЕ выдержки из всех загруженных телеграмм, в которых фигурирует поезд.
- */
 fun mergeSameTrainRowsForDay(
     rows: List<TrainChangeRow>,
     globalExcerptsByTrain: Map<String, List<TelegramExcerptItem>> = emptyMap(),
@@ -761,11 +756,6 @@ fun mergeSameTrainRowsForDay(
     return mergedList.sortedBy { getSortingTime(it) }
 }
 
-/**
- * Построение полной нитки следования поезда.
- * Если в выгрузке поезд отменен (или на станции отменена остановка), то в колонке ВЫГРУЗКА
- * и в колонке СТАТУС ОСТАНОВКИ обязательно отображается ОТМЕНЕН / БЕЗ ОСТАНОВКИ (рис. 4).
- */
 fun buildFullThreads(
     map: StationDateTrainMap,
     afishaMap: Map<String, AfishaBaseTrain>,
@@ -802,7 +792,6 @@ fun buildFullThreads(
 
             val allStations = (parsedStations.keys + afishaStations + tgStations).distinct()
 
-            // Сортируем станции строго по географическому маршруту следования поезда
             val sortedStations = allStations.sortedBy { st ->
                 val idx = PolygonConfig.ALL_STATIONS.indexOfFirst { it.equals(st, ignoreCase = true) }
                 if (idx == -1) 999 else if (isToMsk) -idx else idx
@@ -1150,9 +1139,6 @@ object FileParsers {
         }
     }
 
-    /**
-     * Парсинг нескольких телеграмм с сохранением ВСЕХ телеграмм и выдержек, где фигурирует каждый поезд.
-     */
     fun parseTelegramFiles(files: List<File>, afishaMap: Map<String, AfishaBaseTrain>): TelegramParseResult {
         if (files.isEmpty()) return TelegramParseResult(emptyMap(), emptyMap(), emptyMap())
 
@@ -1542,10 +1528,6 @@ object FileParsers {
         return TelegramParseResult(finalMap, globalExcerptsByTrain, globalThreadsByTrain)
     }
 
-    /**
-     * Парсер текстовых (.txt) и Word (.docx) выгрузок с полной поддержкой капса ("- ОТМЕНЕН") через (?iu)
-     * и привязкой всех найденных телеграмм по номеру поезда.
-     */
     fun parseSummaryExportFiles(
         files: List<File>,
         afishaMap: Map<String, AfishaBaseTrain>,
@@ -1679,7 +1661,6 @@ object FileParsers {
 
                 val trNum = trainNumberRegex.find(cleanParagraph)?.groupValues?.get(1) ?: continue
 
-                // ВАЖНО: (?iu) обеспечивает распознавание капса "- ОТМЕНЕН" и любых других вариантов регистра в кириллице!
                 val hasPartialRouteCancel = Regex("(?iu)(отмен[а-я]*\\s+на\\s+участке|на\\s+участке\\s+[^.;]+\\s+отмен|следует\\s+до\\s+[А-Яа-яЁё\\-]+\\s+вместо|укорочен)").containsMatchIn(cleanParagraph)
                 val localFullCancel = Regex("(?iu)(?:^|[^а-яА-ЯёЁ])(отменяется|отмен[её]н|отменить|полная\\s+отмена)(?:[^а-яА-ЯёЁ]|$)").containsMatchIn(cleanParagraph) &&
                     !Regex("(?iu)отменен[а-я]*\\s+остановк").containsMatchIn(cleanParagraph) &&
@@ -1819,7 +1800,7 @@ object FileParsers {
 }
 
 // ============================================================================
-// 6. ГЕНЕРАТОР ФАЙЛОВ WORD (.DOCX) С ТОЧНЫМ КОНТРОЛЕМ РАЗРЫВОВ СТРАНИЦ
+// 6. ГЕНЕРАТОР ФАЙЛОВ WORD (.DOCX) С ДВУХСТРОЧНЫМ ЗАГОЛОВКОМ ПРОДОЛЖЕНИЯ
 // ============================================================================
 
 object WordCancelGenerator {
@@ -1827,10 +1808,9 @@ object WordCancelGenerator {
     private val departureIncludeRegex = Regex("(?iu)(отправлением\\s+в|отправится\\s+в)")
     private val nightNoteRegex = Regex("(?iu)\\s*\\(в\\s+ночь\\s+на\\s+[^)]+\\)")
 
-    // Максимальное число визуальных строк на странице A4 (Times New Roman 12pt, поля 1.27 см),
-    // при превышении которого вставляется явный разрыв страницы и заголовок:
-    // "Химки / продолжение на 30 ноября / от Москвы / Ипподрома"
-    private const val MAX_VISUAL_LINES_PER_PAGE = 42
+    // Максимальное количество визуальных строк на странице A4 при стандартных полях Word (37 строк),
+    // чтобы длинные двухстрочные записи не вызывали самопроизвольный перенос без заголовка продолжения.
+    private const val MAX_VISUAL_LINES_PER_PAGE = 37
 
     private fun isTerminalStationForTrain(station: String, row: TrainChangeRow): Boolean {
         val text = row.wordExportLine
@@ -1866,21 +1846,9 @@ object WordCancelGenerator {
         return allData.values.any { dtMap -> dtMap.values.any { trMap -> trMap.values.any { it.hasExport } } }
     }
 
-    private fun configurePageMargins(doc: XWPFDocument) {
-        try {
-            val body = doc.document.body
-            val sectPr = if (body.isSetSectPr) body.sectPr else body.addNewSectPr()
-            val pageMar = if (sectPr.isSetPgMar) sectPr.pgMar else sectPr.addNewPgMar()
-            pageMar.top = BigInteger.valueOf(720)    // 0.5 дюйма (1.27 см)
-            pageMar.bottom = BigInteger.valueOf(720) // 0.5 дюйма (1.27 см)
-            pageMar.left = BigInteger.valueOf(1000)
-            pageMar.right = BigInteger.valueOf(800)
-        } catch (_: Exception) {}
-    }
-
     private fun estimateVisualLines(textWithIndent: String): Int {
-        // В строке Times New Roman 12pt при данных полях помещается около 76 символов
-        return maxOf(1, (textWithIndent.length + 75) / 76)
+        // В строке Times New Roman 12pt на стандартной странице A4 помещается ~66 символов
+        return maxOf(1, (textWithIndent.length + 65) / 66)
     }
 
     fun generateStationWordFiles(
@@ -1935,7 +1903,6 @@ object WordCancelGenerator {
             val outFile = File(targetFolder, "$station $fileNameSuffix.docx")
 
             XWPFDocument().use { doc ->
-                configurePageMargins(doc)
                 val subtitle = getDirectionSubtitle(isToMoscow)
                 addCenteredBoldHeader(doc, "$station  Изменения в графике движения эл/поездов")
                 addCenteredBoldHeader(doc, subtitle)
@@ -1948,32 +1915,30 @@ object WordCancelGenerator {
 
                     val firstTrainVisualLines = estimateVisualLines("        ${linesForDate.first().trim()}")
 
-                    // Если заголовок даты + хотя бы первый поезд не помещаются в конец текущей страницы,
-                    // переносим блок новой даты на следующую страницу с шапкой станции
+                    // Если заголовок даты + первый поезд не помещаются в конец страницы,
+                    // переносим блок новой даты на следующую страницу с двухстрочным заголовком продолжения
                     if (currentPageVisualLines + 1 + firstTrainVisualLines > MAX_VISUAL_LINES_PER_PAGE) {
-                        addNewDatePageHeader(doc, station, subtitle)
+                        addContinuationHeader(doc, station, formattedDatesHeader, subtitle)
                         currentPageVisualLines = 2
+                    } else {
+                        addCenteredBoldHeader(doc, formattedDatesHeader)
+                        currentPageVisualLines += 1
                     }
-
-                    addCenteredBoldHeader(doc, formattedDatesHeader)
-                    currentPageVisualLines += 1
 
                     for (rawLine in linesForDate) {
                         val finalTrainLine = "        ${rawLine.trim()}"
                         val neededLines = estimateVisualLines(finalTrainLine)
 
-                        // Если очередная строка поезда не влезает на страницу — делаем разрыв и печатаем 3-строчный заголовок продолжения:
-                        // "Химки"
-                        // "продолжение на 30 ноября"
-                        // "от Москвы / Ипподрома"
+                        // Если очередная строка поезда не влезает на страницу — делаем разрыв и печатаем 2-строчный заголовок продолжения:
+                        // Строка 1: "Химки продолжение на 30 ноября"
+                        // Строка 2: "от Москвы / Ипподрома"
                         if (currentPageVisualLines + neededLines > MAX_VISUAL_LINES_PER_PAGE) {
                             addContinuationHeader(doc, station, formattedDatesHeader, subtitle)
-                            currentPageVisualLines = 3
+                            currentPageVisualLines = 2
                         }
 
                         val p = doc.createParagraph()
                         p.alignment = ParagraphAlignment.LEFT
-                        p.isKeepLines = true
                         p.spacingAfter = 0
                         p.spacingBefore = 0
                         p.spacingAfterLines = 0
@@ -1996,11 +1961,9 @@ object WordCancelGenerator {
         return Pair(generatedCount, targetFolder)
     }
 
-    private fun addCenteredBoldHeader(doc: XWPFDocument, text: String, pageBreakBefore: Boolean = false) {
+    private fun addCenteredBoldHeader(doc: XWPFDocument, text: String) {
         val p = doc.createParagraph()
-        if (pageBreakBefore) p.isPageBreak = true
         p.alignment = ParagraphAlignment.CENTER
-        p.isKeepNext = true
         p.spacingAfter = 0
         p.spacingBefore = 0
         p.setSpacingBetween(1.0, LineSpacingRule.AUTO)
@@ -2011,21 +1974,34 @@ object WordCancelGenerator {
         run.setText(text)
     }
 
-    private fun addNewDatePageHeader(doc: XWPFDocument, station: String, subtitle: String) {
-        addCenteredBoldHeader(doc, "$station  Изменения в графике движения эл/поездов", pageBreakBefore = true)
-        addCenteredBoldHeader(doc, subtitle, pageBreakBefore = false)
-    }
-
     /**
-     * Трехстрочный заголовок при переносе списка поездов одной даты на следующую страницу:
-     * Химки
-     * продолжение на 30 ноября
-     * от Москвы / Ипподрома
+     * Двухстрочный заголовок при переносе списка поездов на следующую страницу:
+     * 1-я строка: "$station продолжение на $datesHeader"
+     * 2-я строка: "$subtitle"
      */
     private fun addContinuationHeader(doc: XWPFDocument, station: String, datesHeader: String, subtitle: String) {
-        addCenteredBoldHeader(doc, station, pageBreakBefore = true)
-        addCenteredBoldHeader(doc, "продолжение на $datesHeader", pageBreakBefore = false)
-        addCenteredBoldHeader(doc, subtitle, pageBreakBefore = false)
+        val p1 = doc.createParagraph()
+        p1.isPageBreak = true
+        p1.alignment = ParagraphAlignment.CENTER
+        p1.spacingAfter = 0
+        p1.spacingBefore = 0
+        p1.setSpacingBetween(1.0, LineSpacingRule.AUTO)
+        val r1 = p1.createRun()
+        r1.fontFamily = "Times New Roman"
+        r1.fontSize = 14
+        r1.isBold = true
+        r1.setText("$station продолжение на $datesHeader")
+
+        val p2 = doc.createParagraph()
+        p2.alignment = ParagraphAlignment.CENTER
+        p2.spacingAfter = 0
+        p2.spacingBefore = 0
+        p2.setSpacingBetween(1.0, LineSpacingRule.AUTO)
+        val r2 = p2.createRun()
+        r2.fontFamily = "Times New Roman"
+        r2.fontSize = 14
+        r2.isBold = true
+        r2.setText(subtitle)
     }
 
     private fun formatMergedDatesHeader(dates: List<String>): String {
@@ -2182,7 +2158,7 @@ fun TrainRApp() {
     }
 
     Row(modifier = Modifier.fillMaxSize().background(TrainRTheme.BgLight)) {
-        // ЛЕВАЯ БОКОВАЯ ПАНЕЛЬ (кнопка "ОБЩИЙ WORD В 1 ФАЙЛЕ" полностью убрана по требованию)
+        // ЛЕВАЯ БОКОВАЯ ПАНЕЛЬ
         Column(
             modifier = Modifier
                 .width(265.dp)
@@ -2288,7 +2264,6 @@ fun TrainRApp() {
 
         // ПРАВАЯ ОСНОВНАЯ ОБЛАСТЬ
         Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-            // ВЕРХНЯЯ ПАНЕЛЬ С ИСПРАВЛЕННЫМ ПОЛЕМ ПОИСКА (БЕЗ ОБРЕЗАНИЯ ТЕКСТА, РИС. 3)
             Surface(color = Color.White, shadowElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
@@ -2349,7 +2324,6 @@ fun TrainRApp() {
                 }
             }
 
-            // ПАНЕЛЬ ФИЛЬТРА ДАТ И ВЫБОРА СТАНЦИЙ ПОЛИГОНА
             Surface(
                 color = Color.White,
                 border = BorderStroke(1.dp, TrainRTheme.BorderCol),
@@ -2477,7 +2451,6 @@ fun TrainRApp() {
                 }
             }
 
-            // ОСНОВНОЙ КОНТЕНТ ВКЛАДКИ
             Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                 when (currentNavTab) {
                     MainNavTab.UPLOADS -> TrainTableSection(
@@ -2573,9 +2546,6 @@ fun TrainRApp() {
     }
 }
 
-/**
- * Поле поиска с идеальным вертикальным центрированием текста (исправляет обрезание текста на рис. 3).
- */
 @Composable
 fun SearchInputBox(
     value: String,
@@ -3104,10 +3074,6 @@ fun StatSummaryBox(title: String, value: String, accentColor: Color, isSelected:
     }
 }
 
-/**
- * Карточка поезда в отчете.
- * Если загружено несколько телеграмм, в которых фигурирует поезд, выводит ВСЕ телеграммы с их номерами, датами, страницами и полными выдержками.
- */
 @Composable
 fun DetailedReportTrainCard(row: TrainChangeRow, onClick: () -> Unit) {
     Surface(
@@ -3323,11 +3289,6 @@ fun YandexAuditTabView(
     }
 }
 
-/**
- * Диалог полного досье по поезду (рис. 4):
- * - Если в выгрузке поезд отменен, в колонке «ВЫГРУЗКА» и «СТАТУС ОСТАНОВКИ» отображается «ОТМЕНЕН».
- * - Если загружено несколько телеграмм, внизу в блоке телеграмм выводятся ВСЕ телеграммы с полными выдержками.
- */
 @Composable
 fun TrainDossierDialog(trainRow: TrainChangeRow, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
