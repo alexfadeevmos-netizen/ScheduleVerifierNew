@@ -94,6 +94,12 @@ enum class ReportFilterType(val code: String, val title: String) {
     MISMATCH("MISMATCH", "РАСХОЖДЕНИЯ ИСТОЧНИКОВ")
 }
 
+enum class YandexViewMode(val label: String) {
+    PDF_DATA("ДАННЫЕ ИЗ PDF ЯНДЕКСА"),
+    COMPARE_CHANGES("СВЕРКА С ВЫГРУЗКОЙ / ТГ"),
+    RAW_TEXT("ТЕКСТ PDF ДОКУМЕНТА")
+}
+
 enum class AuditStatus(val label: String, val color: Color) {
     OK("СОВПАДАЕТ", Color(0xFF16A34A)),
     ONLY_EXPORT("ВЫГРУЗКА (БЕЗ ТГ)", Color(0xFF2563EB)),
@@ -175,12 +181,16 @@ data class AfishaBaseTrain(
 )
 
 data class YandexParsedTrain(
+    val id: String,
     val trainNumber: String,
     val dateStr: String,
     val station: String,
     val departureTime: String,
+    val arrivalTime: String = "—",
+    val routeAndDetails: String = "",
     val statusText: String,
-    val sourceFileName: String = ""
+    val sourceFileName: String = "",
+    val pageNumber: Int = 1
 )
 
 data class PageTextChunk(
@@ -223,7 +233,6 @@ object TrainRTheme {
 }
 
 object PolygonConfig {
-    // Порядок станций строго по географии от Москвы (индекс 0) до Твери/Конаково
     val ALL_STATIONS: List<String> = listOf(
         "Москва", "Останкино", "Лихоборы", "Моссельмаш", "Грачёвская", "Ховрино",
         "Левобережная", "Химки", "Молжаниново", "Новоподрезково", "Подрезково",
@@ -265,7 +274,9 @@ object PolygonConfig {
             .replace(Regex("(?iu)Москва[\\s\\-]*Пасс\\.?[\\s\\-]*(?:Окт(?:ябрьская)?\\.?)?"), "Москва")
             .replace(Regex("(?iu)Москва[\\s\\-]*Пассажирская(?:[\\s\\-]*Октябрьская)?"), "Москва")
             .replace(Regex("(?iu)Москва[\\s\\-]*Окт(?:ябрьская)?\\.?"), "Москва")
+            .replace(Regex("(?iu)Москва\\s*\\(Ленинградский\\s*вокзал\\)"), "Москва")
             .replace(Regex("(?iu)Москва[\\s\\-]*Тов\\.?[\\s\\-]*(?:Окт(?:ябрьская)?\\.?)?"), "Москва-Товарная")
+            .replace(Regex("(?iu)Крюково\\s*\\(Зеленоград\\)"), "Крюково")
             .replace("Зеленоград-Крюково", "Крюково", ignoreCase = true)
             .replace("Грачевская", "Грачёвская", ignoreCase = true)
             .replace("Березки-Дачные", "Берёзки-Дачные", ignoreCase = true)
@@ -395,7 +406,6 @@ fun extractSmartDates(rawText: String): List<String> {
     val result = mutableListOf<String>()
     val monthNamesPattern = "(январ[яе]|феврал[яе]|март[ае]?|апрел[яе]|ма[яе]|июн[яе]|июл[яе]|август[ае]?|сентябр[яе]|октябр[яе]|ноябр[яе]|декабр[яе])"
 
-    // 1. Формат "с 09/11 по 13/11" или "с 09.11 по 13.11"
     val slashRangeRegex = Regex("(?iu)(?:с\\s+)?(\\d{1,2})[./](\\d{2})\\s*(?:по|[-–—])\\s*(\\d{1,2})[./](\\d{2})")
     for (m in slashRangeRegex.findAll(text)) {
         val d1 = m.groupValues[1].toIntOrNull() ?: continue
@@ -408,7 +418,6 @@ fun extractSmartDates(rawText: String): List<String> {
         }
     }
 
-    // 2. Формат "09-13/11" или "23,30/11" или "16/11"
     val slashGroupRegex = Regex("(?iu)(?<!\\d)(\\d{1,2}(?:\\s*(?:,|[-–—]|и)\\s*\\d{1,2})*)[./](\\d{2})(?:[./]\\d{2,4})?(?![\\d/])")
     for (m in slashGroupRegex.findAll(text)) {
         val monthNum = m.groupValues[2].toIntOrNull() ?: continue
@@ -431,7 +440,6 @@ fun extractSmartDates(rawText: String): List<String> {
         }
     }
 
-    // 3. Словесные месяцы: "(09-13, 16-20, 23,30 ноября)" или "17, 19 ноября"
     val wordGroupRegex = Regex("(?iu)((?:(?:с\\s+)?\\d{1,2}(?:\\s*(?:по|[-–—]|,|и)\\s*\\d{1,2})*)+)\\s+$monthNamesPattern")
     for (m in wordGroupRegex.findAll(text)) {
         val daysExpr = m.groupValues[1].replace(Regex("(?iu)\\bс\\b"), " ").replace(Regex("(?iu)\\bпо\\b"), "-")
@@ -815,7 +823,8 @@ fun buildFullThreads(
                 }
 
                 val yandexMatch = yandexList.firstOrNull {
-                    it.trainNumber == tNum && (it.station.equals(st, true) || it.station.isBlank()) &&
+                    (it.trainNumber == tNum || (it.trainNumber == "—" && (it.departureTime == afishaT || it.departureTime == expT.take(5)))) &&
+                        (it.station.equals(st, true) || it.station.isBlank()) &&
                         (it.dateStr == dt || it.dateStr == "Без даты")
                 }
                 val yndT = yandexMatch?.let {
@@ -867,8 +876,10 @@ fun buildFullThreads(
             }
 
             for (r in rows) {
+                val cleanExpDep = Regex("(\\d{1,2}:\\d{2})").find(r.exportTime)?.groupValues?.get(1) ?: ""
                 val matchedYandex = yandexList.firstOrNull {
-                    it.trainNumber == tNum && (it.station.equals(r.station, true) || it.station.isBlank()) &&
+                    (it.trainNumber == tNum || (it.trainNumber == "—" && (it.departureTime == r.afishaTime || it.departureTime == cleanExpDep))) &&
+                        (it.station.equals(r.station, true) || it.station.isBlank()) &&
                         (it.dateStr == dt || it.dateStr == "Без даты")
                 }
                 val updatedYandexTime = matchedYandex?.let {
@@ -952,7 +963,7 @@ object FileParsers {
         return cachedAfishaFile
     }
 
-    fun readSmartTextFile(file: File): String {
+    fun readSmartTextFile(file: File, sortPdfByPosition: Boolean = false): String {
         val ext = file.extension.lowercase(Locale.getDefault())
         if (ext == "docx") {
             FileInputStream(file).use { fis ->
@@ -973,7 +984,9 @@ object FileParsers {
         }
         if (ext == "pdf") {
             Loader.loadPDF(file).use { pdDoc ->
-                val stripper = PDFTextStripper()
+                val stripper = PDFTextStripper().apply {
+                    sortByPosition = sortPdfByPosition
+                }
                 return stripper.getText(pdDoc)
             }
         }
@@ -986,13 +999,15 @@ object FileParsers {
         return if (utf8Str.contains("\uFFFD") || cyrillicCount1251 > cyrillicCountUtf8) cp1251Str else utf8Str
     }
 
-    fun readPagedTextChunks(file: File): List<PageTextChunk> {
+    fun readPagedTextChunks(file: File, sortPdfByPosition: Boolean = false): List<PageTextChunk> {
         val ext = file.extension.lowercase(Locale.getDefault())
         if (ext == "pdf") {
             val pages = mutableListOf<PageTextChunk>()
             Loader.loadPDF(file).use { pdDoc ->
                 val total = pdDoc.numberOfPages
-                val stripper = PDFTextStripper()
+                val stripper = PDFTextStripper().apply {
+                    sortByPosition = sortPdfByPosition
+                }
                 for (p in 1..total) {
                     stripper.startPage = p
                     stripper.endPage = p
@@ -1005,7 +1020,7 @@ object FileParsers {
             if (pages.isNotEmpty()) return pages
         }
 
-        val fullText = readSmartTextFile(file)
+        val fullText = readSmartTextFile(file, sortPdfByPosition)
         if (fullText.contains("\u000C")) {
             return fullText.split("\u000C").mapIndexedNotNull { idx, part ->
                 if (part.isNotBlank()) PageTextChunk(idx + 1, part) else null
@@ -1767,40 +1782,128 @@ object FileParsers {
         return out
     }
 
-    fun parseYandexPdfFiles(files: List<File>): List<YandexParsedTrain> {
+    /**
+     * Умный парсер PDF-файлов Яндекс.Расписаний (с sortByPosition = true).
+     * Распознает строки расписания в любом порядке колонок:
+     * - Время + Номер поезда + Маршрут ("04:37  6501 Тверь — Москва")
+     * - Номер поезда + Маршрут + Время ("6501 Тверь — Москва  04:37")
+     * - Смежные строки (когда время и номер/маршрут находятся на соседних строках PDF)
+     * - Строки Яндекс.Расписаний со временем и маршрутом без явного 4-значного номера поезда.
+     */
+    fun parseYandexPdfFiles(files: List<File>): Pair<List<YandexParsedTrain>, String> {
         val parsed = mutableListOf<YandexParsedTrain>()
-        val lineRegex = Regex("([1-7]\\d{2,3}(?:/[1-7]\\d{2,3})?).*?(\\d{1,2}[:.]\\d{2})")
+        val rawTextBuilder = StringBuilder()
+
+        val trainNumRegex = Regex("\\b([1-7]\\d{2,3}(?:/[1-7]\\d{2,3})?)\\b")
+        val timeRegex = Regex("\\b([0-2]?\\d:[0-5]\\d)\\b")
+        val routeKeywordsRegex = Regex("(?iu)(Москва|Ленинградский|Тверь|Крюково|Зеленоград|Ипподром|47\\s*км|Клин|Подсолнечная|Сходня|Химки|Ховрино|Останкино|Конаково|Решетниково|Завидово|Поварово|МЦД|Ласточка|Экспресс|Стандарт|Комфорт|пригородный|везде|кроме|по\\s+расписанию|отмен[её]н|уш[её]л|изменен)")
+
         for (file in files) {
-            val text = readSmartTextFile(file)
-            val detectedDate = extractSmartDates(text).firstOrNull()
+            val pagedChunks = readPagedTextChunks(file, sortPdfByPosition = true)
+            val fullText = pagedChunks.joinToString("\n") { "--- Страница ${it.pageNumber} (${file.name}) ---\n${it.text}" }
+            rawTextBuilder.appendLine(fullText)
+
+            val detectedDate = extractSmartDates(fullText).firstOrNull()
                 ?: extractSmartDates(file.name).firstOrNull()
-                ?: "Без даты"
-            val detectedStation = PolygonConfig.ALL_STATIONS.firstOrNull {
-                file.nameWithoutExtension.contains(it, ignoreCase = true) || text.lines().take(15).joinToString(" ").contains(it, ignoreCase = true)
+                ?: "Все даты"
+
+            val detectedStation = PolygonConfig.ALL_STATIONS.firstOrNull { st ->
+                file.nameWithoutExtension.contains(st, ignoreCase = true) ||
+                    fullText.lines().take(20).joinToString(" ").contains(st, ignoreCase = true)
             } ?: ""
 
-            for (line in text.lines()) {
-                val m = lineRegex.find(line) ?: continue
-                val trNum = m.groupValues[1]
-                val depTime = m.groupValues[2].replace('.', ':').padStart(5, '0')
-                parsed.add(
-                    YandexParsedTrain(
-                        trainNumber = trNum,
-                        dateStr = detectedDate,
-                        station = detectedStation,
-                        departureTime = depTime,
-                        statusText = if (Regex("(?iu)отмен").containsMatchIn(line)) "Отменён" else "По расписанию",
-                        sourceFileName = file.name
-                    )
-                )
+            for (chunk in pagedChunks) {
+                val lines = chunk.text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+                var i = 0
+                while (i < lines.size) {
+                    val line = lines[i]
+                    // Пропускаем чисто технические строки колонтитулов браузера (URL, дату печати с секундами, номера страниц)
+                    if (line.startsWith("http", ignoreCase = true) || Regex("^\\d+/\\d+$").matches(line)) {
+                        i++
+                        continue
+                    }
+
+                    val timesInLine = timeRegex.findAll(line).map { it.groupValues[1].padStart(5, '0') }.toList()
+                    val trainInLine = trainNumRegex.find(line)?.groupValues?.get(1)
+
+                    if (timesInLine.isNotEmpty() && trainInLine != null) {
+                        // В одной строке есть и время, и номер поезда (в любом порядке!)
+                        val depTime = timesInLine.first()
+                        val arrTime = if (timesInLine.size >= 2) timesInLine[1] else "—"
+                        val nextLineContext = lines.getOrNull(i + 1)?.takeIf { timeRegex.find(it) == null } ?: ""
+                        val combinedInfo = "$line $nextLineContext".replace(Regex("\\s{2,}"), " ").trim()
+                        val status = when {
+                            Regex("(?iu)отмен").containsMatchIn(combinedInfo) -> "Отменён"
+                            Regex("(?iu)изменен|опоздан|задерж").containsMatchIn(combinedInfo) -> "Изменено расписание"
+                            else -> "По расписанию"
+                        }
+                        parsed.add(
+                            YandexParsedTrain(
+                                id = "${file.name}_${chunk.pageNumber}_${i}_${System.nanoTime()}",
+                                trainNumber = trainInLine,
+                                dateStr = detectedDate,
+                                station = detectedStation,
+                                departureTime = depTime,
+                                arrivalTime = arrTime,
+                                routeAndDetails = combinedInfo,
+                                statusText = status,
+                                sourceFileName = file.name,
+                                pageNumber = chunk.pageNumber
+                            )
+                        )
+                        i++
+                        continue
+                    }
+
+                    // Если в текущей строке есть время, а номер поезда или маршрут на соседней строке (выше или ниже)
+                    if (timesInLine.isNotEmpty()) {
+                        val nextLine = lines.getOrNull(i + 1) ?: ""
+                        val prevLine = lines.getOrNull(i - 1) ?: ""
+                        val trainInNext = if (timeRegex.find(nextLine) == null) trainNumRegex.find(nextLine)?.groupValues?.get(1) else null
+                        val trainInPrev = if (timeRegex.find(prevLine) == null) trainNumRegex.find(prevLine)?.groupValues?.get(1) else null
+                        val matchedTrain = trainInNext ?: trainInPrev
+
+                        val combinedWindow = "$line $nextLine".replace(Regex("\\s{2,}"), " ").trim()
+                        if (matchedTrain != null || routeKeywordsRegex.containsMatchIn(combinedWindow)) {
+                            val depTime = timesInLine.first()
+                            val arrTime = if (timesInLine.size >= 2) timesInLine[1] else "—"
+                            val status = when {
+                                Regex("(?iu)отмен").containsMatchIn(combinedWindow) -> "Отменён"
+                                Regex("(?iu)изменен|опоздан|задерж").containsMatchIn(combinedWindow) -> "Изменено расписание"
+                                else -> "По расписанию"
+                            }
+                            parsed.add(
+                                YandexParsedTrain(
+                                    id = "${file.name}_${chunk.pageNumber}_${i}_${System.nanoTime()}",
+                                    trainNumber = matchedTrain ?: "—",
+                                    dateStr = detectedDate,
+                                    station = detectedStation,
+                                    departureTime = depTime,
+                                    arrivalTime = arrTime,
+                                    routeAndDetails = combinedWindow,
+                                    statusText = status,
+                                    sourceFileName = file.name,
+                                    pageNumber = chunk.pageNumber
+                                )
+                            )
+                            if (trainInNext != null) i += 2 else i++
+                            continue
+                        }
+                    }
+                    i++
+                }
             }
         }
-        return parsed
+
+        val deduplicated = parsed.distinctBy { "${it.sourceFileName}|${it.departureTime}|${it.trainNumber}|${it.routeAndDetails.take(40)}" }
+            .sortedBy { parseTrainTimeForSorting(it.departureTime) }
+
+        return Pair(deduplicated, rawTextBuilder.toString().trim())
     }
 }
 
 // ============================================================================
-// 6. ГЕНЕРАТОР ФАЙЛОВ WORD (.DOCX) С ДВУХСТРОЧНЫМ ЗАГОЛОВКОМ ПРОДОЛЖЕНИЯ
+// 6. ГЕНЕРАТОР ФАЙЛОВ WORD (.DOCX) — КОМПАКТНОЕ ЗАПОЛНЕНИЕ СТРАНИЦ БЕЗ ПУСТОТ
 // ============================================================================
 
 object WordCancelGenerator {
@@ -1808,9 +1911,10 @@ object WordCancelGenerator {
     private val departureIncludeRegex = Regex("(?iu)(отправлением\\s+в|отправится\\s+в)")
     private val nightNoteRegex = Regex("(?iu)\\s*\\(в\\s+ночь\\s+на\\s+[^)]+\\)")
 
-    // Максимальное количество визуальных строк на странице A4 при стандартных полях Word (37 строк),
-    // чтобы длинные двухстрочные записи не вызывали самопроизвольный перенос без заголовка продолжения.
-    private const val MAX_VISUAL_LINES_PER_PAGE = 37
+    // На стандартной странице A4 в Word (Times New Roman 12pt, одинарный интервал 1.0)
+    // реально помещается 46 визуальных строк, а ширина строки (16.5 см) вмещает 90 символов.
+    private const val MAX_VISUAL_LINES_PER_PAGE = 46
+    private const val CHARS_PER_LINE_12PT = 90
 
     private fun isTerminalStationForTrain(station: String, row: TrainChangeRow): Boolean {
         val text = row.wordExportLine
@@ -1847,8 +1951,8 @@ object WordCancelGenerator {
     }
 
     private fun estimateVisualLines(textWithIndent: String): Int {
-        // В строке Times New Roman 12pt на стандартной странице A4 помещается ~66 символов
-        return maxOf(1, (textWithIndent.length + 65) / 66)
+        // Строка до 90 символов занимает ровно 1 визуальную строку в Word
+        return maxOf(1, (textWithIndent.length + CHARS_PER_LINE_12PT - 1) / CHARS_PER_LINE_12PT)
     }
 
     fun generateStationWordFiles(
@@ -1915,23 +2019,24 @@ object WordCancelGenerator {
 
                     val firstTrainVisualLines = estimateVisualLines("        ${linesForDate.first().trim()}")
 
-                    // Если заголовок даты + первый поезд не помещаются в конец страницы,
-                    // переносим блок новой даты на следующую страницу с двухстрочным заголовком продолжения
+                    // Переносим заголовок новой даты на следующую страницу ТОЛЬКО если на текущей странице
+                    // вообще не осталось места даже для заголовка даты и первой строки поезда
                     if (currentPageVisualLines + 1 + firstTrainVisualLines > MAX_VISUAL_LINES_PER_PAGE) {
-                        addContinuationHeader(doc, station, formattedDatesHeader, subtitle)
+                        addNewPageStationHeader(doc, station, subtitle)
                         currentPageVisualLines = 2
-                    } else {
-                        addCenteredBoldHeader(doc, formattedDatesHeader)
-                        currentPageVisualLines += 1
                     }
+
+                    addCenteredBoldHeader(doc, formattedDatesHeader)
+                    currentPageVisualLines += 1
 
                     for (rawLine in linesForDate) {
                         val finalTrainLine = "        ${rawLine.trim()}"
                         val neededLines = estimateVisualLines(finalTrainLine)
 
-                        // Если очередная строка поезда не влезает на страницу — делаем разрыв и печатаем 2-строчный заголовок продолжения:
-                        // Строка 1: "Химки продолжение на 30 ноября"
-                        // Строка 2: "от Москвы / Ипподрома"
+                        // Когда страница полностью заполнена (46 строк), переносим остаток списка этой даты
+                        // на следующую страницу с двухстрочным заголовком продолжения:
+                        // 1) "Химки продолжение на 19, 20 ноября"
+                        // 2) "на Москву / Ипподром"
                         if (currentPageVisualLines + neededLines > MAX_VISUAL_LINES_PER_PAGE) {
                             addContinuationHeader(doc, station, formattedDatesHeader, subtitle)
                             currentPageVisualLines = 2
@@ -1961,8 +2066,9 @@ object WordCancelGenerator {
         return Pair(generatedCount, targetFolder)
     }
 
-    private fun addCenteredBoldHeader(doc: XWPFDocument, text: String) {
+    private fun addCenteredBoldHeader(doc: XWPFDocument, text: String, pageBreakBefore: Boolean = false) {
         val p = doc.createParagraph()
+        if (pageBreakBefore) p.isPageBreak = true
         p.alignment = ParagraphAlignment.CENTER
         p.spacingAfter = 0
         p.spacingBefore = 0
@@ -1974,34 +2080,19 @@ object WordCancelGenerator {
         run.setText(text)
     }
 
+    private fun addNewPageStationHeader(doc: XWPFDocument, station: String, subtitle: String) {
+        addCenteredBoldHeader(doc, "$station  Изменения в графике движения эл/поездов", pageBreakBefore = true)
+        addCenteredBoldHeader(doc, subtitle, pageBreakBefore = false)
+    }
+
     /**
-     * Двухстрочный заголовок при переносе списка поездов на следующую страницу:
+     * Двухстрочный заголовок при продолжении списка поездов одной даты на следующей странице:
      * 1-я строка: "$station продолжение на $datesHeader"
      * 2-я строка: "$subtitle"
      */
     private fun addContinuationHeader(doc: XWPFDocument, station: String, datesHeader: String, subtitle: String) {
-        val p1 = doc.createParagraph()
-        p1.isPageBreak = true
-        p1.alignment = ParagraphAlignment.CENTER
-        p1.spacingAfter = 0
-        p1.spacingBefore = 0
-        p1.setSpacingBetween(1.0, LineSpacingRule.AUTO)
-        val r1 = p1.createRun()
-        r1.fontFamily = "Times New Roman"
-        r1.fontSize = 14
-        r1.isBold = true
-        r1.setText("$station продолжение на $datesHeader")
-
-        val p2 = doc.createParagraph()
-        p2.alignment = ParagraphAlignment.CENTER
-        p2.spacingAfter = 0
-        p2.spacingBefore = 0
-        p2.setSpacingBetween(1.0, LineSpacingRule.AUTO)
-        val r2 = p2.createRun()
-        r2.fontFamily = "Times New Roman"
-        r2.fontSize = 14
-        r2.isBold = true
-        r2.setText(subtitle)
+        addCenteredBoldHeader(doc, "$station продолжение на $datesHeader", pageBreakBefore = true)
+        addCenteredBoldHeader(doc, subtitle, pageBreakBefore = false)
     }
 
     private fun formatMergedDatesHeader(dates: List<String>): String {
@@ -2041,6 +2132,7 @@ fun TrainRApp() {
     var afishaCacheMap: Map<String, AfishaBaseTrain> by remember { mutableStateOf(emptyMap()) }
     var stationScheduleMap: StationDateTrainMap by remember { mutableStateOf(emptyMap()) }
     var yandexTrainsList: List<YandexParsedTrain> by remember { mutableStateOf(emptyList()) }
+    var yandexRawPdfText: String by remember { mutableStateOf("") }
 
     var loadedTelegramFiles by remember { mutableStateOf(listOf<File>()) }
     var loadedExportFiles by remember { mutableStateOf(listOf<File>()) }
@@ -2067,14 +2159,15 @@ fun TrainRApp() {
             } else {
                 tgResult.stationMap
             }
-            val parsedYandex = if (loadedYandexFiles.isNotEmpty()) {
+            val (parsedYandex, rawYandexText) = if (loadedYandexFiles.isNotEmpty()) {
                 FileParsers.parseYandexPdfFiles(loadedYandexFiles)
             } else {
-                emptyList()
+                Pair(emptyList(), "")
             }
             val built = buildFullThreads(combinedMap, afishaCacheMap, parsedYandex)
             withContext(Dispatchers.Main) {
                 yandexTrainsList = parsedYandex
+                yandexRawPdfText = rawYandexText
                 stationScheduleMap = built
                 val firstStationWithData = PolygonConfig.ALL_STATIONS.firstOrNull { built[it]?.isNotEmpty() == true }
                 if (built[activePreviewStation].isNullOrEmpty() && firstStationWithData != null) {
@@ -2082,7 +2175,8 @@ fun TrainRApp() {
                 }
                 val tgInfo = if (loadedTelegramFiles.isEmpty()) "ТГ: не загружена" else "ТГ: ${loadedTelegramFiles.size} шт."
                 val expInfo = if (loadedExportFiles.isEmpty()) "Выгрузки: 0" else "Выгрузки: ${loadedExportFiles.size} шт."
-                systemStatusText = "Данные скомпилированы ($expInfo | $tgInfo)"
+                val yndInfo = if (loadedYandexFiles.isEmpty()) "" else " | Яндекс PDF: ${parsedYandex.size} зап."
+                systemStatusText = "Данные скомпилированы ($expInfo | $tgInfo$yndInfo)"
             }
         }
     }
@@ -2219,6 +2313,7 @@ fun TrainRApp() {
                         stationScheduleMap = emptyMap()
                         afishaCacheMap = emptyMap()
                         yandexTrainsList = emptyList()
+                        yandexRawPdfText = ""
                         loadedTelegramFiles = emptyList()
                         loadedExportFiles = emptyList()
                         loadedYandexFiles = emptyList()
@@ -2477,12 +2572,14 @@ fun TrainRApp() {
                         activeStation = activePreviewStation,
                         rows = baseRows,
                         yandexList = yandexTrainsList,
+                        yandexRawText = yandexRawPdfText,
                         loadedYandexFiles = loadedYandexFiles,
+                        searchQuery = searchQuery,
                         onLoadYandexPdf = {
                             val files = pickFilesDialog("Выберите PDF с расписанием Яндекса", arrayOf("pdf", "txt"), true)
                             if (files.isNotEmpty()) {
                                 loadedYandexFiles = (loadedYandexFiles + files).distinctBy { it.absolutePath }
-                                systemStatusText = "Загружен PDF Яндекс.Расписаний (${loadedYandexFiles.size} шт.). Выполняется сверка..."
+                                systemStatusText = "Загружен PDF Яндекс.Расписаний (${loadedYandexFiles.size} шт.). Чтение данных..."
                                 refreshData()
                             }
                         },
@@ -2495,6 +2592,7 @@ fun TrainRApp() {
                         onClearYandexPdf = {
                             loadedYandexFiles = emptyList()
                             yandexTrainsList = emptyList()
+                            yandexRawPdfText = ""
                             refreshData()
                             systemStatusText = "Файлы PDF Яндекса очищены."
                         },
@@ -3191,17 +3289,39 @@ fun DetailedReportTrainCard(row: TrainChangeRow, onClick: () -> Unit) {
     }
 }
 
+/**
+ * Вкладка РАСПИСАНИЕ / ЯНДЕКС (рис. 3):
+ * Сразу после загрузки PDF Яндекс.Расписаний отображает все данные из этого PDF-файла,
+ * сопоставляет их с выгрузкой и телеграммой по номеру поезда или времени отправления,
+ * а также позволяет просмотреть полный текст загруженного PDF-документа.
+ */
 @Composable
 fun YandexAuditTabView(
     activeStation: String,
     rows: List<TrainChangeRow>,
     yandexList: List<YandexParsedTrain>,
+    yandexRawText: String,
     loadedYandexFiles: List<File>,
+    searchQuery: String,
     onLoadYandexPdf: () -> Unit,
     onRunYandexAudit: () -> Unit,
     onClearYandexPdf: () -> Unit,
     onRowClick: (TrainChangeRow) -> Unit
 ) {
+    var viewMode by remember { mutableStateOf(YandexViewMode.PDF_DATA) }
+
+    val filteredYandexList = remember(yandexList, searchQuery) {
+        if (searchQuery.isBlank()) yandexList
+        else yandexList.filter {
+            it.trainNumber.contains(searchQuery.trim(), ignoreCase = true) ||
+                it.departureTime.contains(searchQuery.trim(), ignoreCase = true) ||
+                it.routeAndDetails.contains(searchQuery.trim(), ignoreCase = true)
+        }
+    }
+
+    val rowsByTrainNum = remember(rows) { rows.associateBy { it.trainNumber } }
+    val rowsByBaseTime = remember(rows) { rows.associateBy { it.afishaTime } }
+
     Surface(color = Color.White, shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, TrainRTheme.BorderCol), modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -3213,7 +3333,7 @@ fun YandexAuditTabView(
                         color = TrainRTheme.NavyDark
                     )
                     Text(
-                        "Загружено файлов PDF Яндекса: ${loadedYandexFiles.size} • Записей поездов из PDF: ${yandexList.size}",
+                        "Загружено файлов PDF Яндекса: ${loadedYandexFiles.size} • Найдено рейсов в PDF: ${yandexList.size}",
                         fontSize = 12.sp,
                         color = TrainRTheme.TextSub
                     )
@@ -3251,9 +3371,10 @@ fun YandexAuditTabView(
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(12.dp))
+
+            Spacer(modifier = Modifier.height(10.dp))
             HorizontalDivider(color = TrainRTheme.BorderCol)
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             if (loadedYandexFiles.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -3266,23 +3387,217 @@ fun YandexAuditTabView(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "Нажмите кнопку «ЗАГРУЗИТЬ PDF ЯНДЕКС.РАСПИСАНИЙ» в правом верхнем углу этой вкладки для начала сверки.",
+                            "Нажмите кнопку «ЗАГРУЗИТЬ PDF ЯНДЕКС.РАСПИСАНИЙ» в правом верхнем углу этой вкладки для отображения данных PDF и сверки.",
                             fontSize = 13.sp,
                             color = TrainRTheme.TextSub
                         )
                     }
                 }
-            } else if (rows.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            } else {
+                // Переключатель режимов просмотра загруженного PDF Яндекса
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        YandexViewMode.entries.forEach { mode ->
+                            val selected = viewMode == mode
+                            Button(
+                                onClick = { viewMode = mode },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selected) TrainRTheme.NavyDark else Color(0xFFF1F5F9),
+                                    contentColor = if (selected) Color.White else TrainRTheme.TextDark
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                val countSuffix = when (mode) {
+                                    YandexViewMode.PDF_DATA -> " (${filteredYandexList.size})"
+                                    YandexViewMode.COMPARE_CHANGES -> " (${rows.size})"
+                                    YandexViewMode.RAW_TEXT -> ""
+                                }
+                                Text("${mode.label}$countSuffix", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                     Text(
-                        "Нет поездов для сверки по станции «$activeStation».",
-                        fontSize = 14.sp,
-                        color = TrainRTheme.TextSub
+                        "Файлы: ${loadedYandexFiles.joinToString(", ") { it.name }}",
+                        fontSize = 11.sp,
+                        color = TrainRTheme.TextSub,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-            } else {
-                LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(rows, key = { it.id }) { row -> DetailedReportTrainCard(row) { onRowClick(row) } }
+
+                when (viewMode) {
+                    YandexViewMode.PDF_DATA -> {
+                        if (filteredYandexList.isNotEmpty()) {
+                            Column(modifier = Modifier.fillMaxSize().border(1.dp, TrainRTheme.BorderCol, RoundedCornerShape(8.dp))) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().background(TrainRTheme.NavyDark).padding(horizontal = 12.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("ОТПР. (PDF)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(0.9f))
+                                    Text("№ ПОЕЗДА", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.0f))
+                                    Text("ДАННЫЕ ИЗ PDF ЯНДЕКС.РАСПИСАНИЙ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(2.8f))
+                                    Text("СТАТУС В PDF", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.1f))
+                                    Text("ВЫГРУЗКА / ТГ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.2f))
+                                    Text("СВЕРКА", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.3f))
+                                }
+                                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                    items(filteredYandexList, key = { it.id }) { yTrain ->
+                                        val matchedRow = if (yTrain.trainNumber != "—") {
+                                            rowsByTrainNum[yTrain.trainNumber]
+                                        } else {
+                                            rowsByBaseTime[yTrain.departureTime]
+                                        }
+                                        val displayTrainNum = if (yTrain.trainNumber != "—") "№${yTrain.trainNumber}" else matchedRow?.let { "№${it.trainNumber}" } ?: "—"
+                                        val ourStatusTime = matchedRow?.let {
+                                            if (it.hasExport) it.exportTime else it.telegramTime
+                                        } ?: "По графику"
+
+                                        val isYandexCanceled = yTrain.statusText.contains("Отмен", true)
+                                        val isOurCanceled = matchedRow?.isCanceled == true
+
+                                        val (reconcileLabel, reconcileColor) = when {
+                                            matchedRow == null -> Pair("БЕЗ ИЗМЕНЕНИЙ", TrainRTheme.TextSub)
+                                            isOurCanceled && !isYandexCanceled -> Pair("ОШИБКА: НЕ ОТМЕНЕН В ЯНДЕКСЕ", TrainRTheme.RedCancel)
+                                            !isOurCanceled && isYandexCanceled -> Pair("ОТМЕНЕН В ЯНДЕКСЕ", TrainRTheme.AmberWarn)
+                                            matchedRow.exportTime != "—" && !isOurCanceled && !matchedRow.exportTime.contains(yTrain.departureTime) ->
+                                                Pair("РАСХОЖДЕНИЕ (${matchedRow.exportTime})", TrainRTheme.AmberWarn)
+                                            else -> Pair("СОВПАДАЕТ", TrainRTheme.GreenSuccess)
+                                        }
+
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(
+                                                    when {
+                                                        reconcileColor == TrainRTheme.RedCancel -> TrainRTheme.RedCancel.copy(alpha = 0.08f)
+                                                        isYandexCanceled -> TrainRTheme.AmberWarn.copy(alpha = 0.06f)
+                                                        else -> Color.White
+                                                    }
+                                                )
+                                                .clickable { if (matchedRow != null) onRowClick(matchedRow) }
+                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                yTrain.departureTime,
+                                                fontSize = 13.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = if (isYandexCanceled) TrainRTheme.RedCancel else TrainRTheme.NavyDark,
+                                                modifier = Modifier.weight(0.9f)
+                                            )
+                                            Text(
+                                                displayTrainNum,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = TrainRTheme.RoyalBlue,
+                                                modifier = Modifier.weight(1.0f)
+                                            )
+                                            Column(modifier = Modifier.weight(2.8f).padding(end = 8.dp)) {
+                                                Text(yTrain.routeAndDetails, fontSize = 12.sp, color = TrainRTheme.TextDark)
+                                                Text("Стр. ${yTrain.pageNumber} • ${yTrain.sourceFileName}", fontSize = 10.sp, color = TrainRTheme.TextSub)
+                                            }
+                                            Text(
+                                                yTrain.statusText,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isYandexCanceled) TrainRTheme.RedCancel else TrainRTheme.GreenSuccess,
+                                                modifier = Modifier.weight(1.1f)
+                                            )
+                                            Text(
+                                                ourStatusTime,
+                                                fontSize = 12.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isOurCanceled) TrainRTheme.RedCancel else TrainRTheme.TextDark,
+                                                modifier = Modifier.weight(1.2f)
+                                            )
+                                            Surface(
+                                                color = reconcileColor.copy(alpha = 0.14f),
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = BorderStroke(1.dp, reconcileColor),
+                                                modifier = Modifier.weight(1.3f)
+                                            ) {
+                                                Text(
+                                                    reconcileLabel,
+                                                    color = reconcileColor,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    textAlign = TextAlign.Center,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                                                )
+                                            }
+                                        }
+                                        HorizontalDivider(color = TrainRTheme.BorderCol)
+                                    }
+                                }
+                            }
+                        } else {
+                            // Если PDF нестандартного формата, сразу показываем полный извлеченный текст из PDF
+                            Surface(
+                                color = Color(0xFFF8FAFC),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, TrainRTheme.BorderCol),
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+                                    Text(
+                                        "Содержимое загруженного PDF файла Яндекс.Расписаний:",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = TrainRTheme.NavyDark
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        yandexRawText.ifBlank { "Загруженный PDF-файл не содержит текстового слоя (возможно, это скан-изображение)." },
+                                        fontSize = 12.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = TrainRTheme.TextDark,
+                                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    YandexViewMode.COMPARE_CHANGES -> {
+                        if (rows.isEmpty()) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    "По станции «$activeStation» нет загруженных изменений из выгрузки или телеграммы для сверки. Переключитесь на «ДАННЫЕ ИЗ PDF ЯНДЕКСА», чтобы видеть все рейсы из PDF.",
+                                    fontSize = 13.sp,
+                                    color = TrainRTheme.TextSub,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        } else {
+                            LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(rows, key = { it.id }) { row -> DetailedReportTrainCard(row) { onRowClick(row) } }
+                            }
+                        }
+                    }
+
+                    YandexViewMode.RAW_TEXT -> {
+                        Surface(
+                            color = Color(0xFFF8FAFC),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, TrainRTheme.BorderCol),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            Text(
+                                yandexRawText.ifBlank { "Текст в PDF не найден." },
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = TrainRTheme.TextDark,
+                                modifier = Modifier.fillMaxSize().padding(14.dp).verticalScroll(rememberScrollState())
+                            )
+                        }
+                    }
                 }
             }
         }
